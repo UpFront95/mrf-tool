@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -60,6 +62,7 @@ def run_batch(
     profile_name: str,
     out_dir: str | Path,
     index_payer: str | None = None,
+    workers: int = 1,
     limit: int | None = None,
     max_size_mb: float | None = None,
     overwrite: bool = False,
@@ -79,66 +82,95 @@ def run_batch(
     succeeded = 0
     failed = 0
     skipped = 0
+    lock = threading.Lock()
 
-    with manifest.open("a", encoding="utf-8") as manifest_file:
-        for file_info in file_infos:
-            source = file_info["location"]
-            output_path = out / output_name_for_source(source, profile_name)
-            content_length = file_info.get("content_length_bytes")
-            if (
-                max_size_bytes is not None
-                and isinstance(content_length, int)
-                and content_length > max_size_bytes
-            ):
-                skipped += 1
-                event = {
-                    "status": "skipped",
-                    "source": source,
-                    "out_path": str(output_path),
-                    "reason": "file_too_large",
-                    "content_length_bytes": content_length,
-                    "max_size_bytes": max_size_bytes,
-                }
-                manifest_file.write(json.dumps(event, sort_keys=True) + "\n")
-                manifest_file.flush()
-                continue
-
-            if output_path.exists() and not overwrite:
-                skipped += 1
-                event = {
-                    "status": "skipped",
-                    "source": source,
-                    "out_path": str(output_path),
-                    "reason": "output_exists",
-                    "content_length_bytes": content_length,
-                }
-                manifest_file.write(json.dumps(event, sort_keys=True) + "\n")
-                manifest_file.flush()
-                continue
-
-            attempted += 1
-            try:
-                result = parse_file(
-                    source,
-                    profile_name=profile_name,
-                    out_path=output_path,
-                    index_payer=index_payer,
-                )
-            except Exception as exc:  # pragma: no cover - exact live failures vary.
-                failed += 1
-                event = {
-                    "status": "failed",
-                    "source": source,
-                    "out_path": str(output_path),
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                }
-            else:
-                succeeded += 1
-                event = {"status": "succeeded", **result.to_dict()}
-
+    def _write_event(manifest_file: Any, event: dict[str, Any]) -> None:
+        with lock:
             manifest_file.write(json.dumps(event, sort_keys=True) + "\n")
             manifest_file.flush()
+
+    def _should_skip(file_info: dict[str, Any], output_path: Path) -> dict[str, Any] | None:
+        source = file_info["location"]
+        content_length = file_info.get("content_length_bytes")
+        if (
+            max_size_bytes is not None
+            and isinstance(content_length, int)
+            and content_length > max_size_bytes
+        ):
+            return {
+                "status": "skipped",
+                "source": source,
+                "out_path": str(output_path),
+                "reason": "file_too_large",
+                "content_length_bytes": content_length,
+                "max_size_bytes": max_size_bytes,
+            }
+        if output_path.exists() and not overwrite:
+            return {
+                "status": "skipped",
+                "source": source,
+                "out_path": str(output_path),
+                "reason": "output_exists",
+                "content_length_bytes": content_length,
+            }
+        return None
+
+    def _parse_one(file_info: dict[str, Any]) -> dict[str, Any]:
+        source = file_info["location"]
+        output_path = out / output_name_for_source(source, profile_name)
+        try:
+            result = parse_file(
+                source,
+                profile_name=profile_name,
+                out_path=output_path,
+                index_payer=index_payer,
+            )
+            return {"status": "succeeded", **result.to_dict()}
+        except Exception as exc:  # pragma: no cover
+            return {
+                "status": "failed",
+                "source": source,
+                "out_path": str(output_path),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+
+    with manifest.open("a", encoding="utf-8") as manifest_file:
+        if workers <= 1:
+            for file_info in file_infos:
+                output_path = out / output_name_for_source(file_info["location"], profile_name)
+                skip_event = _should_skip(file_info, output_path)
+                if skip_event:
+                    skipped += 1
+                    _write_event(manifest_file, skip_event)
+                    continue
+                attempted += 1
+                event = _parse_one(file_info)
+                if event["status"] == "succeeded":
+                    succeeded += 1
+                else:
+                    failed += 1
+                _write_event(manifest_file, event)
+        else:
+            to_parse: list[dict[str, Any]] = []
+            for file_info in file_infos:
+                output_path = out / output_name_for_source(file_info["location"], profile_name)
+                skip_event = _should_skip(file_info, output_path)
+                if skip_event:
+                    skipped += 1
+                    _write_event(manifest_file, skip_event)
+                else:
+                    to_parse.append(file_info)
+            attempted = len(to_parse)
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {executor.submit(_parse_one, fi): fi for fi in to_parse}
+                for future in as_completed(futures):
+                    event = future.result()
+                    if event["status"] == "succeeded":
+                        succeeded += 1
+                    else:
+                        failed += 1
+                    _write_event(manifest_file, event)
 
     return BatchResult(
         profile=profile_name,

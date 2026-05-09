@@ -105,6 +105,7 @@ def parse(file_url_or_path: str, profile_name: str, out_path: Path, index_payer:
 @click.option("--overwrite", is_flag=True, help="Overwrite existing Parquet outputs.")
 @click.option("--manifest", "manifest_path", type=click.Path(dir_okay=False, path_type=Path))
 @click.option("--index-payer", default=None, help="Payer label from the source index (e.g. bsca, bcbsmn).")
+@click.option("--workers", default=1, show_default=True, type=int, help="Parallel parse workers.")
 def batch(
     files_json: Path,
     profile_name: str,
@@ -114,6 +115,7 @@ def batch(
     overwrite: bool,
     manifest_path: Path | None,
     index_payer: str | None,
+    workers: int,
 ) -> None:
     """Parse every in-network file listed by an index JSON."""
     result = run_batch(
@@ -121,6 +123,7 @@ def batch(
         profile_name=profile_name,
         out_dir=out_dir,
         index_payer=index_payer,
+        workers=workers,
         limit=limit,
         max_size_mb=max_size_mb,
         overwrite=overwrite,
