@@ -106,6 +106,7 @@ def parse(file_url_or_path: str, profile_name: str, out_path: Path, index_payer:
 @click.option("--manifest", "manifest_path", type=click.Path(dir_okay=False, path_type=Path))
 @click.option("--index-payer", default=None, help="Payer label from the source index (e.g. bsca, bcbsmn).")
 @click.option("--workers", default=1, show_default=True, type=int, help="Parallel parse workers.")
+@click.option("--tmp-dir", default=None, type=click.Path(file_okay=False), help="Directory for temporary download files (default: system temp).")
 def batch(
     files_json: Path,
     profile_name: str,
@@ -116,6 +117,7 @@ def batch(
     manifest_path: Path | None,
     index_payer: str | None,
     workers: int,
+    tmp_dir: str | None,
 ) -> None:
     """Parse every in-network file listed by an index JSON."""
     result = run_batch(
@@ -124,6 +126,7 @@ def batch(
         out_dir=out_dir,
         index_payer=index_payer,
         workers=workers,
+        tmp_dir=tmp_dir,
         limit=limit,
         max_size_mb=max_size_mb,
         overwrite=overwrite,

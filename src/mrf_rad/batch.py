@@ -63,6 +63,7 @@ def run_batch(
     out_dir: str | Path,
     index_payer: str | None = None,
     workers: int = 1,
+    tmp_dir: str | None = None,
     limit: int | None = None,
     max_size_mb: float | None = None,
     overwrite: bool = False,
@@ -124,6 +125,7 @@ def run_batch(
                 profile_name=profile_name,
                 out_path=output_path,
                 index_payer=index_payer,
+                tmp_dir=tmp_dir,
             )
             return {"status": "succeeded", **result.to_dict()}
         except Exception as exc:  # pragma: no cover
