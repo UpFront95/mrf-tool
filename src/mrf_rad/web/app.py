@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from html import escape
 from typing import Any
 
+import duckdb
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,444 +38,244 @@ class QueryRequest(BaseModel):
     limit: int = Field(default=100, ge=1, le=10_000)
 
 
+_PLAN_LABELS: dict[str, str] = {
+    "Blue-Shield-Access-Gold-80-HMO-250-35-Child-Dental": "Access Gold HMO",
+    "Blue-Shield-Access-Gold-80-HMO-250-35-Child-Dental-INF": "Access Gold HMO INF",
+    "Blue-Shield-Access-Platinum-90-HMO-0-20-Child-Dental-INF": "Access Platinum HMO INF",
+    "Blue-Shield-Gold-80-PPO-0-25-Child-Dental": "Gold PPO",
+    "Blue-Shield-Gold-80-PPO-350-25-Child-Dental": "Gold PPO (Alt)",
+    "Blue-Shield-Platinum-90-Trio-HMO-JAN26": "Platinum Trio HMO",
+    "Blue-Shield-Silver-70-HDHP-PPO-2300-30-PCP-Child-Dental-Alt-FAM-INF": "Silver HDHP PPO INF",
+    "Blue-Shield-Silver-70-PPO-2000-45-Child-Dental": "Silver PPO",
+    "Blue-Shield-Trio-Silver-70-HMO-2250-50-Child-Dental": "Trio Silver HMO",
+    "Gold-80-PPO-Jan16": "Gold PPO (Jan16)",
+    "Platinum-90-HMO-Trio-AI-AN-Jan18": "Platinum HMO AI/AN",
+    "Preferred-PPO-Native-American-Jan14": "Preferred PPO AI/AN",
+    "Silver-70-PPO-AI-AN-Jan18": "Silver PPO AI/AN",
+}
+
+
 def _page_html(config: AppConfig) -> str:
-    default_glob = escape(config.parquet_glob, quote=True)
     return f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>mrf-rad web</title>
+    <title>ABA Rate Explorer</title>
     <style>
-      :root {{
-        color-scheme: light dark;
-        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-      }}
-      body {{
-        margin: 0;
-        background: #f4f6f8;
-        color: #14212b;
-      }}
-      main {{
-        max-width: 1240px;
-        margin: 0 auto;
-        padding: 20px;
-      }}
-      h1, h2, h3 {{
-        margin: 0;
-        font-weight: 600;
-      }}
-      .layout {{
-        display: grid;
-        grid-template-columns: 320px minmax(0, 1fr);
-        gap: 20px;
-        align-items: start;
-      }}
-      .panel {{
-        background: #ffffff;
-        border: 1px solid #d7dde3;
-        border-radius: 8px;
-        padding: 16px;
-      }}
-      .stack {{
-        display: grid;
-        gap: 12px;
-      }}
-      .field {{
-        display: grid;
-        gap: 6px;
-      }}
-      label {{
-        font-size: 12px;
-        font-weight: 600;
-        color: #51606f;
-      }}
-      input, select, button, textarea {{
-        font: inherit;
-      }}
-      input, select {{
-        width: 100%;
-        box-sizing: border-box;
-        padding: 8px 10px;
-        border: 1px solid #c8d0d9;
-        border-radius: 6px;
-        background: #fff;
-        color: #14212b;
-      }}
-      button {{
-        padding: 9px 12px;
-        border: 1px solid #c8d0d9;
-        border-radius: 6px;
-        background: #f7f9fb;
-        color: #14212b;
-        cursor: pointer;
-        text-align: left;
-      }}
-      button.primary {{
-        background: #1f6feb;
-        border-color: #1f6feb;
-        color: #fff;
-        text-align: center;
-      }}
-      .preset-list {{
-        display: grid;
-        gap: 8px;
-      }}
-      .preset-list button {{
-        display: grid;
-        gap: 4px;
-      }}
-      .muted {{
-        color: #5a6877;
-        font-size: 13px;
-      }}
-      .results {{
-        display: grid;
-        gap: 16px;
-      }}
-      table {{
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-      }}
-      th, td {{
-        padding: 8px 10px;
-        border-bottom: 1px solid #e4e8ed;
-        text-align: left;
-        vertical-align: top;
-        word-break: break-word;
-      }}
-      th {{
-        background: #f8fafc;
-        position: sticky;
-        top: 0;
-      }}
-      .table-wrap {{
-        overflow: auto;
-        max-height: 540px;
-        border: 1px solid #e4e8ed;
-        border-radius: 6px;
-      }}
-      .summary-grid {{
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 12px;
-      }}
-      .metric {{
-        border: 1px solid #e4e8ed;
-        border-radius: 6px;
-        padding: 12px;
-        background: #fbfcfd;
-      }}
-      .metric .value {{
-        font-size: 24px;
-        font-weight: 600;
-      }}
-      .sql {{
-        white-space: pre-wrap;
-        word-break: break-word;
-        font-family: ui-monospace, SFMono-Regular, monospace;
-        font-size: 12px;
-      }}
-      @media (max-width: 980px) {{
-        .layout {{
-          grid-template-columns: 1fr;
-        }}
-        .summary-grid {{
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }}
-      }}
+      :root {{ color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }}
+      body {{ margin: 0; background: #f4f6f8; color: #14212b; }}
+      main {{ max-width: 1800px; margin: 0 auto; padding: 20px; }}
+      h1, h2 {{ margin: 0; font-weight: 600; }}
+      .layout {{ display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: start; }}
+      .panel {{ background: #fff; border: 1px solid #d7dde3; border-radius: 8px; padding: 16px; }}
+      .stack {{ display: grid; gap: 12px; }}
+      .field {{ display: grid; gap: 6px; }}
+      label {{ font-size: 12px; font-weight: 600; color: #51606f; }}
+      input, select, button {{ font: inherit; }}
+      select {{ width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #c8d0d9; border-radius: 6px; background: #fff; color: #14212b; }}
+      button.primary {{ width: 100%; padding: 10px 12px; border: none; border-radius: 6px; background: #1f6feb; color: #fff; cursor: pointer; font-weight: 600; font-size: 14px; }}
+      button.primary:hover {{ background: #1a60d6; }}
+      .muted {{ color: #5a6877; font-size: 13px; }}
+      table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+      th, td {{ padding: 8px 10px; border-bottom: 1px solid #e4e8ed; text-align: left; vertical-align: top; white-space: nowrap; }}
+      th {{ background: #f8fafc; position: sticky; top: 0; z-index: 1; }}
+      th.sortable {{ cursor: pointer; user-select: none; }}
+      th.sortable:hover {{ background: #eef2f7; }}
+      th.sort-asc::after {{ content: " ▲"; font-size: 10px; }}
+      th.sort-desc::after {{ content: " ▼"; font-size: 10px; }}
+      .table-wrap {{ overflow: auto; max-height: 75vh; border: 1px solid #e4e8ed; border-radius: 6px; }}
+      @media (max-width: 800px) {{ .layout {{ grid-template-columns: 1fr; }} }}
     </style>
   </head>
   <body>
     <main>
       <div class="layout">
         <section class="panel stack">
-          <div class="stack">
-            <h1>mrf-rad web</h1>
-            <div class="muted">Local operator view over parsed Parquet output.</div>
+          <h1>ABA Rate Explorer</h1>
+          <div class="muted">BSCA · professional · fee schedule + per diem · named plans</div>
+
+          <div class="field">
+            <label for="cpt">CPT Code</label>
+            <select id="cpt">
+              <option value="">Select CPT…</option>
+            </select>
           </div>
 
           <div class="field">
-            <label for="parquet_glob">Parquet glob</label>
-            <input id="parquet_glob" value="{default_glob}">
-          </div>
-
-          <div class="field">
-            <label for="service_line">Service line</label>
-            <select id="service_line">
+            <label for="modifier">Modifier</label>
+            <select id="modifier">
               <option value="">Any</option>
-              <option value="aba">ABA</option>
-              <option value="radiology">Radiology</option>
+              <option value="HM">HM — less than bachelor's</option>
+              <option value="HN">HN — bachelor's level</option>
+              <option value="HO">HO — master's level</option>
             </select>
           </div>
 
-          <div class="field">
-            <label for="cpt">CPT</label>
-            <input id="cpt" placeholder="97153">
-          </div>
+          <button class="primary" id="run_btn">Load Rates</button>
 
-          <div class="field">
-            <label for="service_category">Service category</label>
-            <input id="service_category" placeholder="Direct Treatment">
-          </div>
-
-          <div class="field">
-            <label for="payer">Payer</label>
-            <input id="payer" placeholder="Capital BlueCross">
-          </div>
-
-          <div class="field">
-            <label for="billing_class">Billing class</label>
-            <select id="billing_class">
-              <option value="">Any</option>
-              <option value="professional">professional</option>
-              <option value="institutional">institutional</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label for="negotiated_type">Negotiated type</label>
-            <select id="negotiated_type">
-              <option value="">Any</option>
-              <option value="negotiated">negotiated</option>
-              <option value="derived">derived</option>
-              <option value="fee schedule">fee schedule</option>
-              <option value="percentage">percentage</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label for="group_by">Group by</label>
-            <input id="group_by" placeholder="billing_code,service_category">
-          </div>
-
-          <div class="field">
-            <label for="limit">Limit</label>
-            <input id="limit" type="number" min="1" max="10000" value="100">
-          </div>
-
-          <div class="field">
-            <label for="benchmark_eligible">Benchmark eligible only</label>
-            <select id="benchmark_eligible">
-              <option value="false">No</option>
-              <option value="true">Yes</option>
-            </select>
-          </div>
-
-          <div class="stack">
-            <button class="primary" id="run_summary">Run Summary</button>
-            <button class="primary" id="run_rows">Run Rows</button>
-          </div>
-
-          <div class="stack">
-            <h2>Saved Presets</h2>
-            <div id="preset_list" class="preset-list"></div>
-          </div>
+          <div class="muted" id="status">Select a CPT to begin.</div>
         </section>
 
-        <section class="results">
-          <div class="panel stack">
-            <div>
-              <h2>Raw vs Benchmark Summary</h2>
-              <div class="muted">Runs the same grouped summary twice, with and without benchmark filtering, using the current billing-class and negotiated-type filters.</div>
-            </div>
-            <div class="summary-grid">
-              <div class="metric">
-                <div class="muted">Raw groups</div>
-                <div class="value" id="raw_group_count">-</div>
-              </div>
-              <div class="metric">
-                <div class="muted">Benchmark groups</div>
-                <div class="value" id="bench_group_count">-</div>
-              </div>
-              <div class="metric">
-                <div class="muted">Raw rows in groups</div>
-                <div class="value" id="raw_row_total">-</div>
-              </div>
-              <div class="metric">
-                <div class="muted">Benchmark rows in groups</div>
-                <div class="value" id="bench_row_total">-</div>
-              </div>
-            </div>
+        <section class="panel stack">
+          <div>
+            <h2>Plan Rates Median</h2>
+            <div class="muted" id="meta">—</div>
           </div>
-
-          <div class="panel stack">
-            <div>
-              <h2 id="results_title">Results</h2>
-              <div class="muted" id="results_meta">No query run yet.</div>
-            </div>
-            <div class="table-wrap">
-              <table id="results_table"></table>
-            </div>
-          </div>
-
-          <div class="panel stack">
-            <h2>SQL</h2>
-            <div class="sql" id="sql_text"></div>
+          <div class="table-wrap">
+            <table id="results_table"></table>
           </div>
         </section>
       </div>
     </main>
     <script>
-      const state = {{
-        presets: [],
-      }};
+      const sortState = {{ col: null, dir: 1 }};
+      let lastResult = null;
 
-      function el(id) {{
-        return document.getElementById(id);
-      }}
-
-      function currentFormParams() {{
-        return {{
-          parquet_glob: el("parquet_glob").value.trim(),
-          service_line: el("service_line").value || null,
-          cpt: el("cpt").value.trim() || null,
-          service_category: el("service_category").value.trim() || null,
-          payer: el("payer").value.trim() || null,
-          billing_class: el("billing_class").value || null,
-          negotiated_type: el("negotiated_type").value || null,
-          group_by: el("group_by").value.trim() || null,
-          benchmark_eligible: el("benchmark_eligible").value === "true",
-          limit: parseInt(el("limit").value, 10) || 100,
-        }};
-      }}
-
-      function applyParams(params) {{
-        el("parquet_glob").value = params.parquet_glob || el("parquet_glob").value;
-        el("service_line").value = params.service_line || "";
-        el("cpt").value = params.cpt || "";
-        el("service_category").value = params.service_category || "";
-        el("payer").value = params.payer || "";
-        el("billing_class").value = params.billing_class || "";
-        el("negotiated_type").value = params.negotiated_type || "";
-        el("group_by").value = params.group_by || "";
-        el("benchmark_eligible").value = String(Boolean(params.benchmark_eligible));
-        el("limit").value = params.limit || 100;
-      }}
+      function el(id) {{ return document.getElementById(id); }}
 
       function renderTable(result) {{
-        const table = el("results_table");
+        lastResult = result;
         const cols = result.columns || [];
-        const rows = result.rows || [];
-        const head = "<thead><tr>" + cols.map((col) => `<th>${{col}}</th>`).join("") + "</tr></thead>";
-        const body = "<tbody>" + rows.map((row) => {{
-          return "<tr>" + cols.map((col) => {{
-            const value = row[col];
-            return `<td>${{value === null || value === undefined ? "" : JSON.stringify(value).replace(/^\"|\"$/g, "")}}</td>`;
-          }}).join("") + "</tr>";
-        }}).join("") + "</tbody>";
-        table.innerHTML = head + body;
-      }}
+        let rows = (result.rows || []).slice();
+        const tbl = el("results_table");
 
-      async function postQuery(params, title) {{
-        const response = await fetch("/api/query", {{
-          method: "POST",
-          headers: {{ "Content-Type": "application/json" }},
-          body: JSON.stringify(params),
-        }});
-        const payload = await response.json();
-        if (!response.ok) {{
-          throw new Error(payload.detail || "query failed");
-        }}
-        el("results_title").textContent = title;
-        el("results_meta").textContent = `${{payload.row_count}} rows returned`;
-        el("sql_text").textContent = payload.sql;
-        renderTable(payload);
-        return payload;
-      }}
-
-      async function refreshComparison() {{
-        const base = currentFormParams();
-        const compareParams = {{
-          parquet_glob: base.parquet_glob,
-          service_line: base.service_line,
-          cpt: base.cpt,
-          service_category: base.service_category,
-          payer: base.payer,
-          billing_class: base.billing_class,
-          negotiated_type: base.negotiated_type,
-          group_by: base.group_by || "billing_code,service_category",
-          summary: true,
-          limit: 100,
-        }};
-        const [raw, bench] = await Promise.all([
-          fetch("/api/query", {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ ...compareParams, benchmark_eligible: false }}),
-          }}).then((r) => r.json()),
-          fetch("/api/query", {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ ...compareParams, benchmark_eligible: true }}),
-          }}).then((r) => r.json()),
-        ]);
-        el("raw_group_count").textContent = raw.row_count ?? "-";
-        el("bench_group_count").textContent = bench.row_count ?? "-";
-        el("raw_row_total").textContent = (raw.rows || []).reduce((sum, row) => sum + (row.row_count || 0), 0);
-        el("bench_row_total").textContent = (bench.rows || []).reduce((sum, row) => sum + (row.row_count || 0), 0);
-      }}
-
-      async function loadPresets() {{
-        const response = await fetch("/api/presets");
-        const presets = await response.json();
-        state.presets = presets;
-        const host = el("preset_list");
-        host.innerHTML = "";
-        for (const preset of presets) {{
-          const button = document.createElement("button");
-          button.innerHTML = `<strong>${{preset.label}}</strong><span class="muted">${{preset.description}}</span>`;
-          button.addEventListener("click", async () => {{
-            const params = {{ ...preset.params, parquet_glob: el("parquet_glob").value.trim() || preset.params.parquet_glob }};
-            applyParams(params);
-            await postQuery(params, preset.label);
+        if (sortState.col) {{
+          rows.sort((a, b) => {{
+            const av = a[sortState.col], bv = b[sortState.col];
+            if (av == null) return 1;
+            if (bv == null) return -1;
+            return (av < bv ? -1 : av > bv ? 1 : 0) * sortState.dir;
           }});
-          host.appendChild(button);
         }}
-        if (presets.length > 0) {{
-          applyParams(presets[0].params);
+
+        const head = "<thead><tr>" + cols.map(c => {{
+          const active = sortState.col === c;
+          const cls = "sortable" + (active ? (sortState.dir === 1 ? " sort-asc" : " sort-desc") : "");
+          return `<th class="${{cls}}" data-col="${{c}}">${{c}}</th>`;
+        }}).join("") + "</tr></thead>";
+
+        const body = "<tbody>" + rows.map(row => "<tr>" + cols.map(c => {{
+          const v = row[c];
+          if (v == null) return "<td></td>";
+          if (c === "provider_name") {{
+            const t = String(v).length > 28 ? String(v).slice(0, 28) + "…" : v;
+            return `<td title="${{v}}">${{t}}</td>`;
+          }}
+          if (["median_rate","min_rate","max_rate"].includes(c) && typeof v === "number")
+            return `<td>${{v.toFixed(2)}}</td>`;
+          return `<td>${{v}}</td>`;
+        }}).join("") + "</tr>").join("") + "</tbody>";
+
+        tbl.innerHTML = head + body;
+        tbl.querySelectorAll("th.sortable").forEach(th => {{
+          th.addEventListener("click", () => {{
+            const c = th.dataset.col;
+            if (sortState.col === c) sortState.dir *= -1;
+            else {{ sortState.col = c; sortState.dir = 1; }}
+            renderTable(lastResult);
+          }});
+        }});
+      }}
+
+      async function load() {{
+        const cpt = el("cpt").value;
+        const modifier = el("modifier").value;
+        if (!cpt) {{ el("status").textContent = "Select a CPT code first."; return; }}
+        el("status").textContent = "Loading…";
+        const params = {{ cpt }};
+        if (modifier) params.modifier = modifier;
+        const resp = await fetch("/api/plan-rates-median?" + new URLSearchParams(params));
+        const data = await resp.json();
+        if (!resp.ok) {{ el("status").textContent = "Error: " + (data.detail || "failed"); return; }}
+        el("status").textContent = "";
+        el("meta").textContent = `${{data.row_count}} providers · CPT ${{cpt}}${{modifier ? " · " + modifier : ""}}`;
+        renderTable(data);
+      }}
+
+      async function loadFacets() {{
+        const resp = await fetch("/api/facets");
+        const data = await resp.json();
+        for (const code of data.cpt_codes) {{
+          const opt = document.createElement("option");
+          opt.value = code; opt.textContent = code;
+          el("cpt").appendChild(opt);
         }}
       }}
 
-      el("run_summary").addEventListener("click", async () => {{
-        const params = {{ ...currentFormParams(), summary: true }};
-        await postQuery(params, "Summary");
-        await refreshComparison();
-      }});
-
-      el("run_rows").addEventListener("click", async () => {{
-        const params = {{ ...currentFormParams(), summary: false }};
-        await postQuery(params, "Rows");
-      }});
-
-      loadPresets().then(async () => {{
-        const preset = state.presets[0];
-        if (preset) {{
-          await postQuery({{ ...preset.params, parquet_glob: el("parquet_glob").value.trim() }}, preset.label);
-        }}
-        await refreshComparison();
-      }});
+      el("run_btn").addEventListener("click", load);
+      loadFacets();
     </script>
   </body>
 </html>"""
 
 
 def create_app(default_parquet_glob: str) -> FastAPI:
-    app = FastAPI(title="mrf-rad web")
+    app = FastAPI(title="ABA Rate Explorer")
     config = AppConfig(parquet_glob=default_parquet_glob)
+
+    def _con() -> duckdb.DuckDBPyConnection:
+        return duckdb.connect()
+
+    def _modifier_filter(modifier: str | None) -> str:
+        if modifier:
+            return f"AND list_contains(billing_code_modifiers, '{modifier}')"
+        return ""
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
         return _page_html(config)
 
+    @app.get("/api/facets")
+    def get_facets() -> dict[str, Any]:
+        con = _con()
+        cpts = con.execute(
+            "SELECT DISTINCT billing_code FROM read_parquet(?) ORDER BY billing_code",
+            [config.parquet_glob],
+        ).fetchall()
+        return {"cpt_codes": [r[0] for r in cpts if r[0]]}
+
+    @app.get("/api/plan-rates-median")
+    def get_plan_rates_median(cpt: str, modifier: str | None = None) -> dict[str, Any]:
+        sql = f"""
+            SELECT
+                src.npi,
+                COALESCE(n.organization_name, CONCAT_WS(' ', n.first_name, n.last_name)) AS provider_name,
+                COALESCE(array_to_string(src.modifiers, ','), '') AS modifiers,
+                ROUND(MEDIAN(src.negotiated_rate), 2) AS median_rate,
+                MIN(src.negotiated_rate) AS min_rate,
+                MAX(src.negotiated_rate) AS max_rate,
+                COUNT(DISTINCT src.plan_name) AS plan_count
+            FROM (
+                SELECT DISTINCT npi, negotiated_rate, modifiers, plan_name
+                FROM (
+                    SELECT unnest(provider_npi_list) AS npi, negotiated_rate,
+                        billing_code_modifiers AS modifiers,
+                        regexp_extract(source_file_url, '\\d{{4}}-\\d{{2}}-\\d{{2}}_\\d+-(.+)_Blue-Shield', 1) AS plan_name
+                    FROM read_parquet(?)
+                    WHERE billing_code = ?
+                    AND billing_class = 'professional'
+                    AND negotiated_type IN ('fee schedule', 'per diem')
+                    AND negotiated_rate IS NOT NULL
+                    {_modifier_filter(modifier)}
+                )
+                WHERE plan_name NOT SIMILAR TO '\\d+|Blue-Shield-of-California'
+            ) src
+            LEFT JOIN read_parquet('/svr/data/nppes/npi_names.parquet') n ON src.npi = n.npi
+            GROUP BY src.npi, provider_name, src.modifiers
+            ORDER BY median_rate DESC NULLS LAST, provider_name
+            LIMIT 10000
+        """
+        con = _con()
+        result = con.execute(sql, [config.parquet_glob, cpt]).fetchall()
+        columns = ["npi", "provider_name", "modifiers", "median_rate", "min_rate", "max_rate", "plan_count"]
+        rows = [dict(zip(columns, row)) for row in result]
+        return {"columns": columns, "rows": rows, "row_count": len(rows), "sql": sql.strip()}
+
+    # Keep full query API available for future use
     @app.get("/api/config")
     def get_config() -> dict[str, Any]:
         return asdict(config)
-
-    @app.get("/api/presets")
-    def get_presets() -> list[dict[str, Any]]:
-        return [preset.to_dict() for preset in default_presets()]
 
     @app.post("/api/query")
     def post_query(request: QueryRequest) -> dict[str, Any]:
