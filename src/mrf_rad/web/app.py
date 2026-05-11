@@ -234,7 +234,14 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             "SELECT DISTINCT billing_code FROM read_parquet(?) ORDER BY billing_code",
             [config.parquet_glob],
         ).fetchall()
-        return {"cpt_codes": [r[0] for r in cpts if r[0]]}
+        payers = con.execute(
+            "SELECT DISTINCT payer_name FROM read_parquet(?) ORDER BY payer_name",
+            [config.parquet_glob],
+        ).fetchall()
+        return {
+            "cpt_codes": [r[0] for r in cpts if r[0]],
+            "payer_names": [r[0] for r in payers if r[0]],
+        }
 
     @app.get("/api/plan-rates-median")
     def get_plan_rates_median(cpt: str, modifier: str | None = None) -> dict[str, Any]:
@@ -324,6 +331,10 @@ def create_app(default_parquet_glob: str) -> FastAPI:
           </select>
         </div>
         <div class="field">
+          <label for="payer">Payer</label>
+          <select id="payer"><option value="">Any</option></select>
+        </div>
+        <div class="field">
           <label for="highlight_npi">Highlight NPI</label>
           <input id="highlight_npi" placeholder="e.g. 1134800980" value="1134800980">
         </div>
@@ -349,16 +360,24 @@ def create_app(default_parquet_glob: str) -> FastAPI:
           if (code === "97153") opt.selected = true;
           document.getElementById("cpt").appendChild(opt);
         }
+        for (const name of (data.payer_names || [])) {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          document.getElementById("payer").appendChild(opt);
+        }
       }
 
       async function load() {
         const cpt = document.getElementById("cpt").value;
         const modifier = document.getElementById("modifier").value;
+        const payer = document.getElementById("payer").value;
         const npi = document.getElementById("highlight_npi").value.trim();
         if (!cpt) { alert("Select a CPT code."); return; }
 
         const params = { cpt };
         if (modifier) params.modifier = modifier;
+        if (payer) params.payer = payer;
         if (npi) params.npi = npi;
 
         const resp = await fetch("/api/rate-distribution?" + new URLSearchParams(params));
@@ -418,6 +437,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
           ["Min", "$" + s.min.toFixed(2)],
           ["P25", "$" + s.p25.toFixed(2)],
           ["Median", "$" + s.median.toFixed(2)],
+          ["Average", "$" + s.mean.toFixed(2)],
           ["P75", "$" + s.p75.toFixed(2)],
           ["Max", "$" + s.max.toFixed(2)],
           ["Providers", s.total.toLocaleString()],
@@ -444,8 +464,9 @@ def create_app(default_parquet_glob: str) -> FastAPI:
 </html>"""
 
     @app.get("/api/rate-distribution")
-    def get_rate_distribution(cpt: str, modifier: str | None = None, npi: str | None = None) -> dict[str, Any]:
+    def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None, npi: str | None = None) -> dict[str, Any]:
         mod_filter = f"AND list_contains(billing_code_modifiers, '{modifier}')" if modifier else ""
+        payer_filter = f"AND payer_name = '{payer}'" if payer else ""
         sql = f"""
             SELECT npi, ROUND(MEDIAN(negotiated_rate), 2) AS median_rate
             FROM (
@@ -460,6 +481,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     AND negotiated_type IN ('fee schedule', 'per diem')
                     AND negotiated_rate IS NOT NULL
                     {mod_filter}
+                    {payer_filter}
                 )
                 WHERE plan_name NOT SIMILAR TO '\\d+|Blue-Shield-of-California'
             )
@@ -480,6 +502,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             "min": sorted_rates[0],
             "p25": sorted_rates[n // 4],
             "median": sorted_rates[n // 2],
+            "mean": round(sum(sorted_rates) / n, 2),
             "p75": sorted_rates[3 * n // 4],
             "max": sorted_rates[-1],
             "total": n,
