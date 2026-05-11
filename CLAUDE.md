@@ -51,6 +51,10 @@ payer TOC URL
 
 `discovery/base.py` defines `IndexSource`, `InNetworkFile`, `IndexFile`, and `ReportingPlan` dataclasses. `parse_index()` deduplicates by URL and merges `reporting_plan` metadata. `bcbsmn.py` holds the BCBSMN-specific TOC URL resolver.
 
+## Workflow
+
+After any material change (new feature, endpoint, data pipeline step, bug fix), ask the user if they'd like to commit before moving on.
+
 ## Current State
 
 - Pipeline fully operational for BCBSMN and BSCA.
