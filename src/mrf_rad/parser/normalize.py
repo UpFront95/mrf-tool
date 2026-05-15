@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from mrf_rad.codes import classify_code, get_profile
+
+
+class _ProviderRefLookup(Protocol):
+    def __contains__(self, key: object) -> bool: ...
+    def __getitem__(self, key: str) -> list[dict[str, Any]]: ...
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -17,7 +22,7 @@ def normalize_in_network_item(
     metadata: dict[str, Any],
     source_file_url: str,
     index_payer: str | None = None,
-    provider_references: dict[str, list[dict[str, Any]]] | None = None,
+    provider_references: _ProviderRefLookup | None = None,
 ) -> list[dict[str, Any]]:
     profile = get_profile(profile_name)
     classification = classify_code(profile_name, str(item.get("billing_code", "")))

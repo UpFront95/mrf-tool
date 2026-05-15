@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import gzip
+import json
 import os
 import shutil
+import sqlite3
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,15 +77,51 @@ def _metadata(source: str) -> dict[str, Any]:
     return metadata
 
 
-def _provider_references(source: str) -> dict[str, list[dict[str, Any]]]:
-    references: dict[str, list[dict[str, Any]]] = {}
+class _ProviderRefStore:
+    """SQLite-backed provider_references lookup — constant memory regardless of file size."""
+
+    def __init__(self, conn: sqlite3.Connection, db_path: str):
+        self._conn = conn
+        self._db_path = db_path
+
+    def __contains__(self, key: object) -> bool:
+        return self._conn.execute("SELECT 1 FROM refs WHERE id=?", (key,)).fetchone() is not None
+
+    def __getitem__(self, key: str) -> list[dict[str, Any]]:
+        row = self._conn.execute("SELECT groups_json FROM refs WHERE id=?", (key,)).fetchone()
+        if row is None:
+            raise KeyError(key)
+        return json.loads(row[0])
+
+    def close(self) -> None:
+        self._conn.close()
+        try:
+            os.unlink(self._db_path)
+        except OSError:
+            pass
+
+
+def _provider_references(source: str, tmp_dir: str | None = None) -> _ProviderRefStore:
+    fd, db_path = tempfile.mkstemp(suffix=".db", dir=tmp_dir)
+    os.close(fd)
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE refs (id TEXT PRIMARY KEY, groups_json TEXT)")
+    conn.execute("PRAGMA synchronous=OFF")
+    conn.execute("PRAGMA journal_mode=MEMORY")
+    batch: list[tuple[str, str]] = []
     with _open_binary(source) as file_obj:
         for reference in ijson.items(file_obj, "provider_references.item"):
             reference_id = reference.get("provider_group_id")
             provider_groups = reference.get("provider_groups", []) or []
             if reference_id is not None:
-                references[str(reference_id)] = provider_groups
-    return references
+                batch.append((str(reference_id), json.dumps(provider_groups)))
+                if len(batch) >= 1000:
+                    conn.executemany("INSERT OR REPLACE INTO refs VALUES (?,?)", batch)
+                    batch.clear()
+    if batch:
+        conn.executemany("INSERT OR REPLACE INTO refs VALUES (?,?)", batch)
+    conn.commit()
+    return _ProviderRefStore(conn, db_path)
 
 
 def _in_network_items(source: str) -> Iterator[dict[str, Any]]:
@@ -126,28 +164,31 @@ def parse_file(
 
     try:
         metadata = _metadata(local)
-        provider_references = _provider_references(local)
-        scanned_items = 0
-        matched_items = 0
-        rows_written = 0
+        provider_references = _provider_references(local, tmp_dir=tmp_dir)
+        try:
+            scanned_items = 0
+            matched_items = 0
+            rows_written = 0
 
-        with ParquetRowWriter(out) as writer:
-            for item in _in_network_items(local):
-                scanned_items += 1
-                if not profile.contains(str(item.get("billing_code", ""))):
-                    continue
+            with ParquetRowWriter(out) as writer:
+                for item in _in_network_items(local):
+                    scanned_items += 1
+                    if not profile.contains(str(item.get("billing_code", ""))):
+                        continue
 
-                matched_items += 1
-                rows = normalize_in_network_item(
-                    item,
-                    profile_name=profile.name,
-                    metadata=metadata,
-                    source_file_url=source_name,
-                    index_payer=index_payer,
-                    provider_references=provider_references,
-                )
-                writer.write_rows(rows)
-                rows_written += len(rows)
+                    matched_items += 1
+                    rows = normalize_in_network_item(
+                        item,
+                        profile_name=profile.name,
+                        metadata=metadata,
+                        source_file_url=source_name,
+                        index_payer=index_payer,
+                        provider_references=provider_references,
+                    )
+                    writer.write_rows(rows)
+                    rows_written += len(rows)
+        finally:
+            provider_references.close()
     finally:
         if cleanup:
             os.unlink(local)
