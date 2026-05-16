@@ -303,7 +303,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             [config.glob_list],
         ).fetchall()
         payers = con.execute(
-            "SELECT DISTINCT payer_name FROM read_parquet(?) ORDER BY payer_name",
+            "SELECT DISTINCT index_payer FROM read_parquet(?) ORDER BY index_payer",
             [config.glob_list],
         ).fetchall()
         return {
@@ -313,7 +313,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
 
     @app.get("/api/plan-rates-median")
     def get_plan_rates_median(cpt: str, modifier: str | None = None, payer: str | None = None) -> dict[str, Any]:
-        payer_filter = f"AND payer_name = '{payer}'" if payer else ""
+        payer_filter = f"AND index_payer = '{payer}'" if payer else ""
         sql = f"""
             SELECT
                 src.npi,
@@ -333,7 +333,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     FROM read_parquet(?)
                     WHERE billing_code = ?
                     AND billing_class = 'professional'
-                    AND negotiated_type IN ('fee schedule', 'per diem')
+                    AND negotiated_type IN ('fee schedule', 'per diem', 'negotiated')
                     AND negotiated_rate IS NOT NULL
                     {_modifier_filter(modifier)}
                     {payer_filter}
@@ -357,7 +357,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
     @app.get("/api/rate-distribution")
     def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None, npi: str | None = None) -> dict[str, Any]:
         mod_filter = f"AND list_contains(billing_code_modifiers, '{modifier}')" if modifier else ""
-        payer_filter = f"AND payer_name = '{payer}'" if payer else ""
+        payer_filter = f"AND index_payer = '{payer}'" if payer else ""
         sql = f"""
             SELECT npi, ROUND(MEDIAN(negotiated_rate), 2) AS median_rate
             FROM (
@@ -369,7 +369,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     FROM read_parquet(?)
                     WHERE billing_code = ?
                     AND billing_class = 'professional'
-                    AND negotiated_type IN ('fee schedule', 'per diem')
+                    AND negotiated_type IN ('fee schedule', 'per diem', 'negotiated')
                     AND negotiated_rate IS NOT NULL
                     {mod_filter}
                     {payer_filter}
@@ -398,10 +398,21 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             "total": n,
         }
 
-        # Count providers per distinct rate value
-        from collections import Counter
-        counts = Counter(all_rates)
-        bins = [{"rate": rate, "count": cnt} for rate, cnt in sorted(counts.items())]
+        # Bucket into histogram bins (up to 50) for readable chart
+        min_r, max_r = sorted_rates[0], sorted_rates[-1]
+        if max_r > min_r:
+            num_bins = min(50, len(set(all_rates)))
+            bin_width = (max_r - min_r) / num_bins
+            buckets: dict[int, int] = {}
+            for r in all_rates:
+                idx = min(int((r - min_r) / bin_width), num_bins - 1)
+                buckets[idx] = buckets.get(idx, 0) + 1
+            bins = [
+                {"rate": round(min_r + (i + 0.5) * bin_width, 2), "count": cnt}
+                for i, cnt in sorted(buckets.items())
+            ]
+        else:
+            bins = [{"rate": min_r, "count": n}]
 
         # Highlight NPI
         highlight = None
