@@ -174,6 +174,7 @@ def _chart_page_html() -> str:
       async function loadTable() {
         const cpt = document.getElementById("cpt").value;
         const modifier = document.getElementById("modifier").value;
+        const payer = document.getElementById("payer").value;
         if (!cpt) return;
 
         document.getElementById("table_status").textContent = "Loading…";
@@ -182,6 +183,7 @@ def _chart_page_html() -> str:
 
         const params = { cpt };
         if (modifier) params.modifier = modifier;
+        if (payer) params.payer = payer;
 
         const resp = await fetch("/api/plan-rates-median?" + new URLSearchParams(params));
         const data = await resp.json();
@@ -305,39 +307,41 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         }
 
     @app.get("/api/plan-rates-median")
-    def get_plan_rates_median(cpt: str, modifier: str | None = None) -> dict[str, Any]:
+    def get_plan_rates_median(cpt: str, modifier: str | None = None, payer: str | None = None) -> dict[str, Any]:
+        payer_filter = f"AND payer_name = '{payer}'" if payer else ""
         sql = f"""
             SELECT
                 src.npi,
                 COALESCE(n.organization_name, CONCAT_WS(' ', n.first_name, n.last_name)) AS provider_name,
                 COALESCE(array_to_string(src.modifiers, ','), '') AS modifiers,
+                src.payer_name,
                 ROUND(MEDIAN(src.negotiated_rate), 2) AS median_rate,
                 MIN(src.negotiated_rate) AS min_rate,
                 MAX(src.negotiated_rate) AS max_rate,
-                COUNT(DISTINCT src.plan_name) AS plan_count
+                COUNT(*) AS rate_count
             FROM (
-                SELECT DISTINCT npi, negotiated_rate, modifiers, plan_name
+                SELECT DISTINCT npi, negotiated_rate, modifiers, payer_name
                 FROM (
                     SELECT unnest(provider_npi_list) AS npi, negotiated_rate,
                         billing_code_modifiers AS modifiers,
-                        regexp_extract(source_file_url, '\\d{{4}}-\\d{{2}}-\\d{{2}}_\\d+-(.+)_Blue-Shield', 1) AS plan_name
+                        payer_name
                     FROM read_parquet(?)
                     WHERE billing_code = ?
                     AND billing_class = 'professional'
                     AND negotiated_type IN ('fee schedule', 'per diem')
                     AND negotiated_rate IS NOT NULL
                     {_modifier_filter(modifier)}
+                    {payer_filter}
                 )
-                WHERE plan_name NOT SIMILAR TO '\\d+|Blue-Shield-of-California'
             ) src
             LEFT JOIN read_parquet('/svr/data/nppes/npi_names.parquet') n ON src.npi = n.npi
-            GROUP BY src.npi, provider_name, src.modifiers
+            GROUP BY src.npi, provider_name, src.modifiers, src.payer_name
             ORDER BY median_rate DESC NULLS LAST, provider_name
             LIMIT 10000
         """
         con = _con()
         result = con.execute(sql, [config.parquet_glob, cpt]).fetchall()
-        columns = ["npi", "provider_name", "modifiers", "median_rate", "min_rate", "max_rate", "plan_count"]
+        columns = ["npi", "provider_name", "modifiers", "payer_name", "median_rate", "min_rate", "max_rate", "rate_count"]
         rows = [dict(zip(columns, row)) for row in result]
         return {"columns": columns, "rows": rows, "row_count": len(rows), "sql": sql.strip()}
 
@@ -352,11 +356,11 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         sql = f"""
             SELECT npi, ROUND(MEDIAN(negotiated_rate), 2) AS median_rate
             FROM (
-                SELECT DISTINCT npi, negotiated_rate, plan_name
+                SELECT DISTINCT npi, negotiated_rate, payer_name
                 FROM (
                     SELECT unnest(provider_npi_list) AS npi, negotiated_rate,
                         billing_code_modifiers,
-                        regexp_extract(source_file_url, '\\d{{4}}-\\d{{2}}-\\d{{2}}_\\d+-(.+)_Blue-Shield', 1) AS plan_name
+                        payer_name
                     FROM read_parquet(?)
                     WHERE billing_code = ?
                     AND billing_class = 'professional'
@@ -365,7 +369,6 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     {mod_filter}
                     {payer_filter}
                 )
-                WHERE plan_name NOT SIMILAR TO '\\d+|Blue-Shield-of-California'
             )
             GROUP BY npi
             ORDER BY median_rate
