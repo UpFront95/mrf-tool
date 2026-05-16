@@ -15,6 +15,11 @@ from mrf_rad.query import run_query
 class AppConfig:
     parquet_glob: str
 
+    @property
+    def glob_list(self) -> list[str]:
+        """Split comma-separated globs into a list for DuckDB."""
+        return [g.strip() for g in self.parquet_glob.split(",") if g.strip()]
+
 
 class QueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -295,11 +300,11 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         con = _con()
         cpts = con.execute(
             "SELECT DISTINCT billing_code FROM read_parquet(?) ORDER BY billing_code",
-            [config.parquet_glob],
+            [config.glob_list],
         ).fetchall()
         payers = con.execute(
             "SELECT DISTINCT payer_name FROM read_parquet(?) ORDER BY payer_name",
-            [config.parquet_glob],
+            [config.glob_list],
         ).fetchall()
         return {
             "cpt_codes": [r[0] for r in cpts if r[0]],
