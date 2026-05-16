@@ -345,7 +345,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             LIMIT 10000
         """
         con = _con()
-        result = con.execute(sql, [config.parquet_glob, cpt]).fetchall()
+        result = con.execute(sql, [config.glob_list, cpt]).fetchall()
         columns = ["npi", "provider_name", "modifiers", "payer_name", "median_rate", "min_rate", "max_rate", "rate_count"]
         rows = [dict(zip(columns, row)) for row in result]
         return {"columns": columns, "rows": rows, "row_count": len(rows), "sql": sql.strip()}
@@ -379,7 +379,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             ORDER BY median_rate
         """
         con = _con()
-        rows = con.execute(sql, [config.parquet_glob, cpt]).fetchall()
+        rows = con.execute(sql, [config.glob_list, cpt]).fetchall()
         if not rows:
             return {"bins": [], "stats": {}, "highlight": None}
 
