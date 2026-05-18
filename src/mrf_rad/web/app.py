@@ -262,6 +262,14 @@ def _chart_page_html() -> str:
 </html>"""
 
 
+_COMPLETE_PAYER_NAMES = {
+    "Blue Shield of California",
+    "Anthem Blue Cross California",
+    "Blue Cross and Blue Shield of Texas",
+    "Blue Cross and Blue Shield of Illinois",
+}
+
+
 def create_app(default_parquet_glob: str) -> FastAPI:
     app = FastAPI(title="ABA Rate Explorer")
     config = AppConfig(parquet_glob=default_parquet_glob)
@@ -285,13 +293,9 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             "SELECT DISTINCT billing_code FROM read_parquet(?) ORDER BY billing_code",
             [config.glob_list],
         ).fetchall()
-        payers = con.execute(
-            "SELECT DISTINCT payer_name FROM read_parquet(?) WHERE payer_name IS NOT NULL ORDER BY payer_name",
-            [config.glob_list],
-        ).fetchall()
         return {
             "cpt_codes": [r[0] for r in cpts if r[0]],
-            "payer_names": [r[0] for r in payers],
+            "payer_names": sorted(_COMPLETE_PAYER_NAMES),
         }
 
     @app.get("/api/plan-rates-median")
