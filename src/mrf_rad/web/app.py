@@ -165,6 +165,13 @@ def _chart_page_html() -> str:
 
         document.getElementById("chart_panel").style.display = "block";
         document.getElementById("table_panel").style.display = "none";
+
+        if (!data.bins || data.bins.length === 0) {
+          if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+          document.getElementById("chart").getContext("2d").clearRect(0, 0, 9999, 9999);
+          document.getElementById("stats").innerHTML = "<div class='muted'>No data for this selection.</div>";
+          return;
+        }
         renderChart(data, cpt, modifier);
         renderStats(data);
       }
