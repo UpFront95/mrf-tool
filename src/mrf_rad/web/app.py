@@ -101,10 +101,10 @@ def _chart_page_html() -> str:
         <div class="field">
           <label for="modifier">Modifier</label>
           <select id="modifier">
-            <option value="">Any</option>
+            <option value="" selected>Any</option>
             <option value="HM">HM — less than bachelor's</option>
             <option value="HN">HN — bachelor's level</option>
-            <option value="HO" selected>HO — master's level</option>
+            <option value="HO">HO — master's level</option>
           </select>
         </div>
         <div class="field">
