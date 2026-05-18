@@ -43,12 +43,6 @@ class QueryRequest(BaseModel):
 
 
 
-_PAYER_DISPLAY_NAMES: dict[str, str] = {
-    "anthem-ca": "Anthem Blue Cross California",
-    "bsca": "Blue Shield of California",
-    "bcbstx": "Blue Cross Blue Shield of Texas",
-}
-
 
 def _chart_page_html() -> str:
     return """<!doctype html>
@@ -153,9 +147,9 @@ def _chart_page_html() -> str:
           if (code === "97153") opt.selected = true;
           document.getElementById("cpt").appendChild(opt);
         }
-        for (const p of (data.payer_names || [])) {
+        for (const name of (data.payer_names || [])) {
           const opt = document.createElement("option");
-          opt.value = p.value; opt.textContent = p.label;
+          opt.value = name; opt.textContent = name;
           document.getElementById("payer").appendChild(opt);
         }
       }
@@ -310,20 +304,17 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             [config.glob_list],
         ).fetchall()
         payers = con.execute(
-            "SELECT DISTINCT index_payer FROM read_parquet(?) ORDER BY index_payer",
+            "SELECT DISTINCT payer_name FROM read_parquet(?) WHERE payer_name IS NOT NULL ORDER BY payer_name",
             [config.glob_list],
         ).fetchall()
         return {
             "cpt_codes": [r[0] for r in cpts if r[0]],
-            "payer_names": [
-                {"value": r[0], "label": _PAYER_DISPLAY_NAMES.get(r[0], r[0])}
-                for r in payers if r[0]
-            ],
+            "payer_names": [r[0] for r in payers],
         }
 
     @app.get("/api/plan-rates-median")
     def get_plan_rates_median(cpt: str, modifier: str | None = None, payer: str | None = None) -> dict[str, Any]:
-        payer_filter = f"AND index_payer = '{payer}'" if payer else ""
+        payer_filter = f"AND payer_name = '{payer}'" if payer else ""
         sql = f"""
             SELECT
                 src.npi,
@@ -367,7 +358,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
     @app.get("/api/rate-distribution")
     def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None, npi: str | None = None) -> dict[str, Any]:
         mod_filter = f"AND list_contains(billing_code_modifiers, '{modifier}')" if modifier else ""
-        payer_filter = f"AND index_payer = '{payer}'" if payer else ""
+        payer_filter = f"AND payer_name = '{payer}'" if payer else ""
         sql = f"""
             SELECT npi, ROUND(MEDIAN(negotiated_rate), 2) AS median_rate
             FROM (
