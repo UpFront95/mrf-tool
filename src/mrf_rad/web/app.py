@@ -107,17 +107,12 @@ def _chart_page_html() -> str:
             <option value="HO">HO — master's level</option>
           </select>
         </div>
-        <div class="field">
-          <label for="highlight_npi">Highlight NPI</label>
-          <input id="highlight_npi" placeholder="e.g. 1134800980" value="1134800980">
-        </div>
         <button id="run_btn">Show Chart</button>
       </div>
 
       <div class="panel" id="chart_panel">
         <canvas id="chart"></canvas>
         <div class="stats" id="stats"></div>
-        <div id="highlight_info"></div>
         <div style="margin-top:16px;">
           <button class="secondary" id="show_table_btn">Show Detail Table</button>
         </div>
@@ -158,13 +153,11 @@ def _chart_page_html() -> str:
         const cpt = document.getElementById("cpt").value;
         const modifier = document.getElementById("modifier").value;
         const payer = document.getElementById("payer").value;
-        const npi = document.getElementById("highlight_npi").value.trim();
         if (!cpt) { alert("Select a CPT code."); return; }
 
         const params = { cpt };
         if (modifier) params.modifier = modifier;
         if (payer) params.payer = payer;
-        if (npi) params.npi = npi;
 
         const resp = await fetch("/api/rate-distribution?" + new URLSearchParams(params));
         const data = await resp.json();
@@ -174,7 +167,6 @@ def _chart_page_html() -> str:
         document.getElementById("table_panel").style.display = "none";
         renderChart(data, cpt, modifier);
         renderStats(data);
-        renderHighlight(data);
       }
 
       async function loadTable() {
@@ -203,12 +195,9 @@ def _chart_page_html() -> str:
 
       function renderChart(data, cpt, modifier) {
         const bins = data.bins;
-        const highlightRate = data.highlight ? data.highlight.rate : null;
         const labels = bins.map(b => "$" + b.rate.toFixed(2));
         const counts = bins.map(b => b.count);
-        const colors = bins.map(b =>
-          highlightRate !== null && Math.abs(b.rate - highlightRate) < 0.001 ? "#e6522c" : "#1f6feb"
-        );
+        const colors = bins.map(() => "#1f6feb");
         if (chartInstance) chartInstance.destroy();
         chartInstance = new Chart(document.getElementById("chart"), {
           type: "bar",
@@ -229,13 +218,6 @@ def _chart_page_html() -> str:
           ["P75", "$" + s.p75.toFixed(2)], ["Max", "$" + s.max.toFixed(2)],
           ["Providers", s.total.toLocaleString()],
         ].map(([lbl, val]) => `<div class="stat"><div class="val">${val}</div><div class="lbl">${lbl}</div></div>`).join("");
-      }
-
-      function renderHighlight(data) {
-        const h = data.highlight;
-        const el = document.getElementById("highlight_info");
-        if (!h) { el.innerHTML = ""; return; }
-        el.innerHTML = `<div class="highlight-info"><strong>${h.name || h.npi}</strong> (${h.npi}) — median rate <strong>$${h.rate.toFixed(2)}</strong> · ${h.percentile}th percentile</div>`;
       }
 
       function renderTable(result) {
@@ -356,7 +338,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         return _chart_page_html()
 
     @app.get("/api/rate-distribution")
-    def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None, npi: str | None = None) -> dict[str, Any]:
+    def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None) -> dict[str, Any]:
         mod_filter = f"AND list_contains(billing_code_modifiers, '{modifier}')" if modifier else ""
         payer_filter = f"AND payer_name = '{payer}'" if payer else ""
         sql = f"""
@@ -382,10 +364,9 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         con = _con()
         rows = con.execute(sql, [config.glob_list, cpt]).fetchall()
         if not rows:
-            return {"bins": [], "stats": {}, "highlight": None}
+            return {"bins": [], "stats": {}}
 
         all_rates = [r[1] for r in rows]
-        npi_rates = {r[0]: r[1] for r in rows}
         n = len(all_rates)
 
         sorted_rates = sorted(all_rates)
@@ -399,7 +380,6 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             "total": n,
         }
 
-        # Bucket into histogram bins (up to 50) for readable chart
         min_r, max_r = sorted_rates[0], sorted_rates[-1]
         if max_r > min_r:
             num_bins = min(50, len(set(all_rates)))
@@ -415,23 +395,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         else:
             bins = [{"rate": min_r, "count": n}]
 
-        # Highlight NPI
-        highlight = None
-        if npi and npi in npi_rates:
-            rate = npi_rates[npi]
-            percentile = round(100 * sum(1 for r in sorted_rates if r <= rate) / n)
-            name_row = con.execute(
-                "SELECT COALESCE(organization_name, first_name || ' ' || last_name) FROM read_parquet('/svr/data/nppes/npi_names.parquet') WHERE npi = ?",
-                [npi]
-            ).fetchone()
-            highlight = {
-                "npi": npi,
-                "name": name_row[0].strip() if name_row else None,
-                "rate": rate,
-                "percentile": percentile,
-            }
-
-        return {"bins": bins, "stats": stats, "highlight": highlight}
+        return {"bins": bins, "stats": stats}
 
     # Keep full query API available for future use
     @app.get("/api/config")
