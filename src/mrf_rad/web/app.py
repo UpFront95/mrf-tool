@@ -43,6 +43,13 @@ class QueryRequest(BaseModel):
 
 
 
+_PAYER_DISPLAY_NAMES: dict[str, str] = {
+    "anthem-ca": "Anthem Blue Cross California",
+    "bsca": "Blue Shield of California",
+    "bcbstx": "Blue Cross Blue Shield of Texas",
+}
+
+
 def _chart_page_html() -> str:
     return """<!doctype html>
 <html lang="en">
@@ -146,9 +153,9 @@ def _chart_page_html() -> str:
           if (code === "97153") opt.selected = true;
           document.getElementById("cpt").appendChild(opt);
         }
-        for (const name of (data.payer_names || [])) {
+        for (const p of (data.payer_names || [])) {
           const opt = document.createElement("option");
-          opt.value = name; opt.textContent = name;
+          opt.value = p.value; opt.textContent = p.label;
           document.getElementById("payer").appendChild(opt);
         }
       }
@@ -308,7 +315,10 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         ).fetchall()
         return {
             "cpt_codes": [r[0] for r in cpts if r[0]],
-            "payer_names": [r[0] for r in payers if r[0]],
+            "payer_names": [
+                {"value": r[0], "label": _PAYER_DISPLAY_NAMES.get(r[0], r[0])}
+                for r in payers if r[0]
+            ],
         }
 
     @app.get("/api/plan-rates-median")
