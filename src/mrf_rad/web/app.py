@@ -115,6 +115,9 @@ def _chart_page_html() -> str:
       th.sort-asc::after { content: " ▲"; font-size: 10px; }
       th.sort-desc::after { content: " ▼"; font-size: 10px; }
       .table-wrap { overflow: auto; max-height: 60vh; border: 1px solid #e4e8ed; border-radius: 6px; }
+      .checkbox-field { display: flex; align-items: center; gap: 6px; padding-bottom: 2px; }
+      .checkbox-field input { width: 16px; height: 16px; cursor: pointer; }
+      .checkbox-field label { font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
     </style>
   </head>
   <body>
@@ -138,6 +141,10 @@ def _chart_page_html() -> str:
             <option value="HN">HN — bachelor's level</option>
             <option value="HO">HO — master's level</option>
           </select>
+        </div>
+        <div class="checkbox-field">
+          <input type="checkbox" id="exclude_physicians" checked>
+          <label for="exclude_physicians">Exclude physicians</label>
         </div>
         <button id="run_btn">Show Chart</button>
       </div>
@@ -189,9 +196,11 @@ def _chart_page_html() -> str:
         const payer = document.getElementById("payer").value;
         if (!cpt) { alert("Select a CPT code."); return; }
 
+        const excludePhysicians = document.getElementById("exclude_physicians").checked;
         const params = { cpt };
         if (modifier) params.modifier = modifier;
         if (payer) params.payer = payer;
+        if (excludePhysicians) params.exclude_physicians = "1";
 
         const resp = await fetch("/api/rate-distribution?" + new URLSearchParams(params));
         const data = await resp.json();
@@ -401,13 +410,20 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         return _chart_page_html()
 
     @app.get("/api/rate-distribution")
-    def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None) -> dict[str, Any]:
+    def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None, exclude_physicians: str | None = None) -> dict[str, Any]:
         mod_filter = f"AND list_contains(billing_code_modifiers, '{modifier}')" if modifier else ""
         payer_filter = f"AND payer_name = '{payer}'" if payer else ""
+        physician_join = """
+            LEFT JOIN read_parquet('/svr/data/nppes/npi_names.parquet') nppes
+                ON src.npi = nppes.npi
+            WHERE (nppes.primary_taxonomy IS NULL
+                OR (nppes.primary_taxonomy NOT LIKE '207%'
+                    AND nppes.primary_taxonomy NOT LIKE '208%'))
+        """ if exclude_physicians else ""
         sql = f"""
             SELECT npi, ROUND(MEDIAN(negotiated_rate), 2) AS median_rate
             FROM (
-                SELECT DISTINCT npi, negotiated_rate, payer_name
+                SELECT DISTINCT src.npi, src.negotiated_rate
                 FROM (
                     SELECT unnest(provider_npi_list) AS npi, negotiated_rate,
                         billing_code_modifiers,
@@ -419,7 +435,8 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     AND negotiated_rate IS NOT NULL
                     {mod_filter}
                     {payer_filter}
-                )
+                ) src
+                {physician_join}
             )
             GROUP BY npi
             ORDER BY median_rate
