@@ -231,9 +231,11 @@ def _chart_page_html() -> str:
         document.getElementById("table_panel").style.display = "block";
         document.getElementById("table_panel").scrollIntoView({ behavior: "smooth", block: "start" });
 
+        const excludePhysicians = document.getElementById("exclude_physicians").checked;
         const params = { cpt };
         if (modifier) params.modifier = modifier;
         if (payer) params.payer = payer;
+        if (excludePhysicians) params.exclude_physicians = "1";
 
         const resp = await fetch("/api/plan-rates-median?" + new URLSearchParams(params));
         const data = await resp.json();
@@ -368,8 +370,11 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         }
 
     @app.get("/api/plan-rates-median")
-    def get_plan_rates_median(cpt: str, modifier: str | None = None, payer: str | None = None) -> dict[str, Any]:
+    def get_plan_rates_median(cpt: str, modifier: str | None = None, payer: str | None = None, exclude_physicians: str | None = None) -> dict[str, Any]:
         payer_filter = f"AND payer_name = '{payer}'" if payer else ""
+        physician_filter = """AND (n.primary_taxonomy IS NULL
+                OR (n.primary_taxonomy NOT LIKE '207%'
+                    AND n.primary_taxonomy NOT LIKE '208%'))""" if exclude_physicians else ""
         sql = f"""
             SELECT
                 src.npi,
@@ -396,6 +401,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                 )
             ) src
             LEFT JOIN read_parquet('/svr/data/nppes/npi_names.parquet') n ON src.npi = n.npi
+            WHERE 1=1 {physician_filter}
             GROUP BY src.npi, provider_name, src.modifiers, src.payer_name
             ORDER BY median_rate DESC NULLS LAST, provider_name
             LIMIT 10000
