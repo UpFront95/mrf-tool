@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -9,6 +11,36 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from mrf_rad.query import run_query
+
+# Maps MRF payer_name → CSV CustomerName
+_CONTRACT_PAYER_MAP: dict[str, str] = {
+    "Blue Shield of California": "Blue Shield of California",
+    "Anthem Blue Cross California": "Anthem Blue Cross of California",
+    "Blue Cross and Blue Shield of Texas": "Blue Cross Blue Shield of Texas",
+    "Blue Cross and Blue Shield of Illinois": "Blue Cross Blue Shield of Illinois",
+}
+
+_ABA_CODES = {"97151", "97152", "97153", "97154", "97155", "97156"}
+
+
+def _load_contract_rates() -> dict[str, dict[str, float]]:
+    """Load ContractRates.csv from cwd; returns {csv_customer_name: {cpt: rate}}."""
+    path = Path("data/ContractRates.csv")
+    if not path.exists():
+        return {}
+    rates: dict[str, dict[str, float]] = {}
+    with path.open(encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            cpt = row.get("CPTCode", "")
+            if cpt not in _ABA_CODES:
+                continue
+            try:
+                rate = float(row["ContractRatePerUnit"])
+            except (ValueError, KeyError):
+                continue
+            name = row["CustomerName"]
+            rates.setdefault(name, {})[cpt] = rate
+    return rates
 
 
 @dataclass(frozen=True)
@@ -132,10 +164,12 @@ def _chart_page_html() -> str:
       let chartInstance = null;
       const sortState = { col: null, dir: 1 };
       let lastTableResult = null;
+      let contractRates = {};
 
       async function loadFacets() {
-        const resp = await fetch("/api/facets");
-        const data = await resp.json();
+        const [facetResp, crResp] = await Promise.all([fetch("/api/facets"), fetch("/api/contract-rates")]);
+        const data = await facetResp.json();
+        contractRates = await crResp.json();
         for (const code of data.cpt_codes) {
           const opt = document.createElement("option");
           opt.value = code; opt.textContent = code;
@@ -172,8 +206,9 @@ def _chart_page_html() -> str:
           document.getElementById("stats").innerHTML = "<div class='muted'>No data for this selection.</div>";
           return;
         }
-        renderChart(data, cpt, modifier);
-        renderStats(data);
+        const contractRate = (payer && contractRates[payer] && contractRates[payer][cpt]) ? contractRates[payer][cpt] : null;
+        renderChart(data, cpt, modifier, contractRate);
+        renderStats(data, contractRate);
       }
 
       async function loadTable() {
@@ -200,11 +235,14 @@ def _chart_page_html() -> str:
         renderTable(data);
       }
 
-      function renderChart(data, cpt, modifier) {
+      function renderChart(data, cpt, modifier, contractRate) {
         const bins = data.bins;
+        const binWidth = bins.length > 1 ? bins[1].rate - bins[0].rate : 1;
         const labels = bins.map(b => "$" + b.rate.toFixed(2));
         const counts = bins.map(b => b.count);
-        const colors = bins.map(() => "#1f6feb");
+        const colors = bins.map(b =>
+          contractRate !== null && Math.abs(b.rate - contractRate) <= binWidth ? "#e6522c" : "#1f6feb"
+        );
         if (chartInstance) chartInstance.destroy();
         chartInstance = new Chart(document.getElementById("chart"), {
           type: "bar",
@@ -217,14 +255,17 @@ def _chart_page_html() -> str:
         });
       }
 
-      function renderStats(data) {
+      function renderStats(data, contractRate) {
         const s = data.stats;
-        document.getElementById("stats").innerHTML = [
+        const items = [
           ["Min", "$" + s.min.toFixed(2)], ["P25", "$" + s.p25.toFixed(2)],
           ["Median", "$" + s.median.toFixed(2)], ["Average", "$" + s.mean.toFixed(2)],
           ["P75", "$" + s.p75.toFixed(2)], ["Max", "$" + s.max.toFixed(2)],
           ["Providers", s.total.toLocaleString()],
-        ].map(([lbl, val]) => `<div class="stat"><div class="val">${val}</div><div class="lbl">${lbl}</div></div>`).join("");
+        ];
+        if (contractRate !== null) items.push(["Our Rate", "<span style='color:#e6522c;font-weight:700'>$" + contractRate.toFixed(2) + "</span>"]);
+        document.getElementById("stats").innerHTML = items
+          .map(([lbl, val]) => `<div class="stat"><div class="val">${val}</div><div class="lbl">${lbl}</div></div>`).join("");
       }
 
       function renderTable(result) {
@@ -284,10 +325,21 @@ def create_app(default_parquet_glob: str) -> FastAPI:
     def _con() -> duckdb.DuckDBPyConnection:
         return duckdb.connect()
 
+    contract_rates = _load_contract_rates()
+
     def _modifier_filter(modifier: str | None) -> str:
         if modifier:
             return f"AND list_contains(billing_code_modifiers, '{modifier}')"
         return ""
+
+    @app.get("/api/contract-rates")
+    def get_contract_rates() -> dict[str, Any]:
+        # Return rates keyed by MRF payer_name
+        result: dict[str, dict[str, float]] = {}
+        for mrf_name, csv_name in _CONTRACT_PAYER_MAP.items():
+            if csv_name in contract_rates:
+                result[mrf_name] = contract_rates[csv_name]
+        return result
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
