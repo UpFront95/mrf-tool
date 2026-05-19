@@ -89,11 +89,12 @@ def _chart_page_html() -> str:
       body { margin: 0; background: #f4f6f8; color: #14212b; }
       main { max-width: 1100px; margin: 0 auto; padding: 24px; }
       h1 { margin: 0 0 4px; font-weight: 600; }
-      .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin: 20px 0; }
-      .field { display: grid; gap: 6px; }
-      label { font-size: 12px; font-weight: 600; color: #51606f; }
-      select, input { padding: 8px 10px; border: 1px solid #c8d0d9; border-radius: 6px; font: inherit; background: #fff; min-width: 160px; }
-      button { padding: 9px 20px; background: #1f6feb; color: #fff; border: none; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer; }
+      .controls { display: flex; gap: 10px; flex-wrap: nowrap; align-items: flex-end; margin: 16px 0; }
+      .field { display: grid; gap: 4px; }
+      label { font-size: 11px; font-weight: 600; color: #51606f; }
+      select { padding: 7px 8px; border: 1px solid #c8d0d9; border-radius: 6px; font: inherit; background: #fff; }
+      input[type="text"], input[type="number"] { padding: 7px 8px; border: 1px solid #c8d0d9; border-radius: 6px; font: inherit; background: #fff; }
+      button { padding: 8px 18px; background: #1f6feb; color: #fff; border: none; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
       button:hover { background: #1a60d6; }
       button.secondary { background: #fff; color: #1f6feb; border: 1px solid #1f6feb; }
       button.secondary:hover { background: #f0f4ff; }
@@ -115,9 +116,9 @@ def _chart_page_html() -> str:
       th.sort-asc::after { content: " ▲"; font-size: 10px; }
       th.sort-desc::after { content: " ▼"; font-size: 10px; }
       .table-wrap { overflow: auto; max-height: 60vh; border: 1px solid #e4e8ed; border-radius: 6px; }
-      .checkbox-field { display: flex; align-items: center; gap: 6px; padding-bottom: 2px; }
-      .checkbox-field input { width: 16px; height: 16px; cursor: pointer; }
-      .checkbox-field label { font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+      .checkbox-field { display: flex; align-items: center; gap: 5px; padding-bottom: 7px; }
+      .checkbox-field input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; margin: 0; }
+      .checkbox-field label { font-size: 12px; font-weight: 500; color: #14212b; cursor: pointer; white-space: nowrap; }
     </style>
   </head>
   <body>
