@@ -430,6 +430,9 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             return {"bins": [], "stats": {}}
 
         all_rates = [r[1] for r in rows]
+        sorted_rates = sorted(all_rates)
+        median = sorted_rates[len(sorted_rates) // 2]
+        all_rates = [r for r in all_rates if r <= 4 * median]
         n = len(all_rates)
 
         sorted_rates = sorted(all_rates)
