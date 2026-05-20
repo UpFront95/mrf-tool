@@ -78,12 +78,17 @@ def _taxonomy_label(code: str | None) -> str:
     return code[:10]
 
 
-def _load_contract_rates() -> dict[str, dict[str, float]]:
-    """Load ContractRates.csv from cwd; returns {csv_customer_name: {cpt: rate}}."""
-    path = Path("data/ContractRates.csv")
+_CREDENTIAL_MODIFIERS = {"HM", "HN", "HO"}
+
+
+def _load_contract_rates() -> dict[str, dict[str, dict[str, float]]]:
+    """Load ContractRatesV2.csv; returns {csv_customer_name: {cpt: {modifier: rate}}}.
+    modifier is HM/HN/HO or '' for base rate. GT/95/telehealth variants are deduplicated."""
+    path = Path("data/ContractRatesV2.csv")
     if not path.exists():
         return {}
-    rates: dict[str, dict[str, float]] = {}
+    rates: dict[str, dict[str, dict[str, float]]] = {}
+    seen: set[tuple[str, str, str]] = set()
     with path.open(encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             cpt = row.get("CPTCode", "")
@@ -94,7 +99,14 @@ def _load_contract_rates() -> dict[str, dict[str, float]]:
             except (ValueError, KeyError):
                 continue
             name = row["CustomerName"]
-            rates.setdefault(name, {})[cpt] = rate
+            m1 = (row.get("Modifier1500_1") or "").strip().upper()
+            m2 = (row.get("Modifier1500_2") or "").strip().upper()
+            modifier = next((m for m in (m1, m2) if m in _CREDENTIAL_MODIFIERS), "")
+            key = (name, cpt, modifier)
+            if key in seen:
+                continue
+            seen.add(key)
+            rates.setdefault(name, {}).setdefault(cpt, {})[modifier] = rate
     return rates
 
 
@@ -246,6 +258,14 @@ def _chart_page_html() -> str:
         }
       }
 
+      function getContractRate(payer, cpt, modifier) {
+        const byCpt = contractRates[payer] && contractRates[payer][cpt];
+        if (!byCpt) return null;
+        if (modifier && byCpt[modifier] !== undefined) return byCpt[modifier];
+        if (byCpt[""] !== undefined) return byCpt[""];
+        return null;
+      }
+
       async function loadChart() {
         const cpt = document.getElementById("cpt").value;
         const modifier = document.getElementById("modifier").value;
@@ -271,7 +291,7 @@ def _chart_page_html() -> str:
           document.getElementById("stats").innerHTML = "<div class='muted'>No data for this selection.</div>";
           return;
         }
-        const contractRate = (payer && contractRates[payer] && contractRates[payer][cpt]) ? contractRates[payer][cpt] : null;
+        const contractRate = getContractRate(payer, cpt, modifier);
         renderChart(data, cpt, modifier, contractRate);
         renderStats(data, contractRate);
       }
@@ -405,8 +425,8 @@ def create_app(default_parquet_glob: str) -> FastAPI:
 
     @app.get("/api/contract-rates")
     def get_contract_rates() -> dict[str, Any]:
-        # Return rates keyed by MRF payer_name
-        result: dict[str, dict[str, float]] = {}
+        # Return rates keyed by MRF payer_name → {cpt: {modifier: rate}}
+        result: dict[str, dict[str, dict[str, float]]] = {}
         for mrf_name, csv_name in _CONTRACT_PAYER_MAP.items():
             if csv_name in contract_rates:
                 result[mrf_name] = contract_rates[csv_name]
