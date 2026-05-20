@@ -332,7 +332,8 @@ def _chart_page_html() -> str:
         ];
         if (contractRate !== null) items.push(["Our Rate", "<span style='color:#e6522c;font-weight:700'>$" + contractRate.toFixed(2) + "</span>"]);
         document.getElementById("stats").innerHTML = items
-          .map(([lbl, val]) => `<div class="stat"><div class="val">${val}</div><div class="lbl">${lbl}</div></div>`).join("");
+          .map(([lbl, val]) => `<div class="stat"><div class="val">${val}</div><div class="lbl">${lbl}</div></div>`).join("")
+          + "<div style='width:100%;font-size:11px;color:#888;margin-top:6px'>Rates above 4× median excluded from chart</div>";
       }
 
       function renderTable(result) {
