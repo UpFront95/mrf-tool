@@ -26,7 +26,7 @@ _PAYER_MODIFIER_CONVENTION: dict[str, str] = {
     "Blue Shield of California": "explicit",
     "Anthem Blue Cross California": "none",
     "Blue Cross and Blue Shield of Texas": "cpt_implicit",
-    "Blue Cross and Blue Shield of Illinois": "cpt_implicit",
+    "Blue Cross and Blue Shield of Illinois": "none",
 }
 
 # For cpt_implicit payers: credential represented by empty-modifier MRF rows
