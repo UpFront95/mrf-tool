@@ -36,6 +36,7 @@ _TAXONOMY_LABELS: list[tuple[str, str]] = [
     ("133", "Dietitian"),
     ("163", "Registered Nurse"),
     ("171", "Acupuncturist"),
+    ("173", "Independent Med Examiner"),
     ("176", "Foster Care Agency"),
     ("183", "Pharmacist"),
     ("204", "Physician"),
@@ -44,7 +45,10 @@ _TAXONOMY_LABELS: list[tuple[str, str]] = [
     ("237", "Occupational Therapist"),
     ("251", "Behavioral Health Agency"),
     ("273", "Psychiatric Facility"),
+    ("284", "Rehabilitation Hospital"),
     ("291", "Laboratory"),
+    ("335", "Prosthetics/Orthotics"),
+    ("364", "Clinical Nurse Specialist"),
     ("332", "DME Supplier"),
     ("363L", "Nurse Practitioner"),
     ("363A", "Physician Asst"),
@@ -438,7 +442,9 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     AND n.primary_taxonomy NOT LIKE '231%'
                     AND n.primary_taxonomy NOT LIKE '111%'
                     AND n.primary_taxonomy NOT LIKE '122%'
-                    AND n.primary_taxonomy NOT LIKE '103T%'))""" if exclude_physicians else ""
+                    AND n.primary_taxonomy NOT LIKE '103T%'
+                    AND n.primary_taxonomy NOT LIKE '173%'
+                    AND n.primary_taxonomy NOT LIKE '364%'))""" if exclude_physicians else ""
         sql = f"""
             SELECT
                 src.npi,
@@ -508,7 +514,9 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     AND nppes.primary_taxonomy NOT LIKE '231%'
                     AND nppes.primary_taxonomy NOT LIKE '111%'
                     AND nppes.primary_taxonomy NOT LIKE '122%'
-                    AND nppes.primary_taxonomy NOT LIKE '103T%'))
+                    AND nppes.primary_taxonomy NOT LIKE '103T%'
+                    AND nppes.primary_taxonomy NOT LIKE '173%'
+                    AND nppes.primary_taxonomy NOT LIKE '364%'))
         """ if exclude_physicians else ""
         sql = f"""
             SELECT npi, ROUND(MEDIAN(negotiated_rate), 2) AS median_rate
