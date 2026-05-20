@@ -385,7 +385,8 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     AND n.primary_taxonomy NOT LIKE '152%'
                     AND n.primary_taxonomy NOT LIKE '231%'
                     AND n.primary_taxonomy NOT LIKE '111%'
-                    AND n.primary_taxonomy NOT LIKE '122%'))""" if exclude_physicians else ""
+                    AND n.primary_taxonomy NOT LIKE '122%'
+                    AND n.primary_taxonomy NOT LIKE '103T%'))""" if exclude_physicians else ""
         sql = f"""
             SELECT
                 src.npi,
@@ -447,7 +448,8 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     AND nppes.primary_taxonomy NOT LIKE '152%'
                     AND nppes.primary_taxonomy NOT LIKE '231%'
                     AND nppes.primary_taxonomy NOT LIKE '111%'
-                    AND nppes.primary_taxonomy NOT LIKE '122%'))
+                    AND nppes.primary_taxonomy NOT LIKE '122%'
+                    AND nppes.primary_taxonomy NOT LIKE '103T%'))
         """ if exclude_physicians else ""
         sql = f"""
             SELECT npi, ROUND(MEDIAN(negotiated_rate), 2) AS median_rate
