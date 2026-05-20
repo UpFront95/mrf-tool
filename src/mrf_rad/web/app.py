@@ -373,12 +373,12 @@ def _chart_page_html() -> str:
         if (byCpt) {
           const entries = Object.entries(byCpt).sort(([a], [b]) => a.localeCompare(b));
           const parts = entries.map(([mod, rate]) => (mod ? mod : "Base") + " $" + rate.toFixed(2));
-          yourRatesHtml = `<div style='width:100%;font-size:11px;color:#888;margin-top:4px'>Your contract: ${parts.join(" · ")}</div>`;
+          yourRatesHtml = `<div style='width:100%;font-size:13px;color:#888;margin-top:4px'>Your contract: ${parts.join(" · ")}</div>`;
         }
         document.getElementById("stats").innerHTML = items
           .map(([lbl, val]) => `<div class="stat"><div class="val">${val}</div><div class="lbl">${lbl}</div></div>`).join("")
           + yourRatesHtml
-          + "<div style='width:100%;font-size:11px;color:#888;margin-top:2px'>Rates above 4× median excluded from chart</div>";
+          + "<div style='width:100%;font-size:13px;color:#888;margin-top:2px'>Rates above 4× median excluded from chart</div>";
       }
 
       function renderTable(result) {
