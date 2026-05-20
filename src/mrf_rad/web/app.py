@@ -43,6 +43,7 @@ _TAXONOMY_LABELS: list[tuple[str, str]] = [
     ("208", "Physician"),
     ("237", "Occupational Therapist"),
     ("251", "Behavioral Health Agency"),
+    ("273", "Psychiatric Facility"),
     ("291", "Laboratory"),
     ("332", "DME Supplier"),
     ("363L", "Nurse Practitioner"),
