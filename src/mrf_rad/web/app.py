@@ -307,9 +307,12 @@ def _chart_page_html() -> str:
         const binWidth = bins.length > 1 ? bins[1].rate - bins[0].rate : 1;
         const labels = bins.map(b => "$" + b.rate.toFixed(2));
         const counts = bins.map(b => b.count);
-        const colors = bins.map(b =>
-          contractRate !== null && Math.abs(b.rate - contractRate) <= binWidth ? "#e6522c" : "#1f6feb"
-        );
+        let closestIdx = -1;
+        if (contractRate !== null) {
+          let minDist = Infinity;
+          bins.forEach((b, i) => { const d = Math.abs(b.rate - contractRate); if (d < minDist) { minDist = d; closestIdx = i; } });
+        }
+        const colors = bins.map((b, i) => i === closestIdx ? "#e6522c" : "#1f6feb");
         if (chartInstance) chartInstance.destroy();
         chartInstance = new Chart(document.getElementById("chart"), {
           type: "bar",
