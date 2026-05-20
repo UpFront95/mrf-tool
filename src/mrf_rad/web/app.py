@@ -423,7 +423,8 @@ def create_app(default_parquet_glob: str) -> FastAPI:
     def get_plan_rates_median(cpt: str, modifier: str | None = None, payer: str | None = None, exclude_physicians: str | None = None) -> dict[str, Any]:
         payer_filter = f"AND payer_name = '{payer}'" if payer else ""
         physician_filter = """AND (n.primary_taxonomy IS NULL
-                OR (n.primary_taxonomy NOT LIKE '207%'
+                OR (n.primary_taxonomy NOT LIKE '204%'
+                    AND n.primary_taxonomy NOT LIKE '207%'
                     AND n.primary_taxonomy NOT LIKE '208%'
                     AND n.primary_taxonomy NOT LIKE '363%'
                     AND n.primary_taxonomy NOT LIKE '367%'
@@ -492,7 +493,8 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             LEFT JOIN read_parquet('/svr/data/nppes/npi_names.parquet') nppes
                 ON src.npi = nppes.npi
             WHERE (nppes.primary_taxonomy IS NULL
-                OR (nppes.primary_taxonomy NOT LIKE '207%'
+                OR (nppes.primary_taxonomy NOT LIKE '204%'
+                    AND nppes.primary_taxonomy NOT LIKE '207%'
                     AND nppes.primary_taxonomy NOT LIKE '208%'
                     AND nppes.primary_taxonomy NOT LIKE '363%'
                     AND nppes.primary_taxonomy NOT LIKE '367%'
