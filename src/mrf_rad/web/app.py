@@ -22,6 +22,43 @@ _CONTRACT_PAYER_MAP: dict[str, str] = {
 
 _ABA_CODES = {"97151", "97152", "97153", "97154", "97155", "97156"}
 
+_TAXONOMY_LABELS: list[tuple[str, str]] = [
+    ("103K", "BCBA"),
+    ("103T", "Psychologist"),
+    ("103G", "Psychologist"),
+    ("103", "Mental Health"),
+    ("1041C", "Clinical Social Worker"),
+    ("104", "Social Worker"),
+    ("106H", "MFT"),
+    ("106", "Counselor"),
+    ("207", "Physician"),
+    ("208", "Physician"),
+    ("363L", "Nurse Practitioner"),
+    ("363A", "Physician Asst"),
+    ("363", "NP/PA"),
+    ("367", "CRNA"),
+    ("225", "Physical Therapist"),
+    ("235", "Speech/Language"),
+    ("213", "Podiatrist"),
+    ("231", "Audiologist"),
+    ("174", "Naturopath"),
+    ("152", "Optometrist"),
+    ("111", "Chiropractor"),
+    ("122", "Dentist"),
+    ("390", "Student"),
+    ("282", "Hospital"),
+    ("261", "Clinic/Center"),
+]
+
+
+def _taxonomy_label(code: str | None) -> str:
+    if not code:
+        return ""
+    for prefix, label in _TAXONOMY_LABELS:
+        if code.startswith(prefix):
+            return label
+    return code[:10]
+
 
 def _load_contract_rates() -> dict[str, dict[str, float]]:
     """Load ContractRates.csv from cwd; returns {csv_customer_name: {cpt: rate}}."""
@@ -396,7 +433,8 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                 ROUND(MEDIAN(src.negotiated_rate), 2) AS median_rate,
                 MIN(src.negotiated_rate) AS min_rate,
                 MAX(src.negotiated_rate) AS max_rate,
-                COUNT(*) AS rate_count
+                COUNT(*) AS rate_count,
+                ANY_VALUE(n.primary_taxonomy) AS primary_taxonomy
             FROM (
                 SELECT DISTINCT npi, negotiated_rate, modifiers, payer_name
                 FROM (
@@ -420,8 +458,13 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         """
         con = _con()
         result = con.execute(sql, [config.glob_list, cpt]).fetchall()
-        columns = ["npi", "provider_name", "modifiers", "payer_name", "median_rate", "min_rate", "max_rate", "rate_count"]
-        rows = [dict(zip(columns, row)) for row in result]
+        db_cols = ["npi", "provider_name", "modifiers", "payer_name", "median_rate", "min_rate", "max_rate", "rate_count", "primary_taxonomy"]
+        columns = ["npi", "provider_name", "type", "modifiers", "payer_name", "median_rate", "min_rate", "max_rate", "rate_count"]
+        rows = []
+        for row in result:
+            r = dict(zip(db_cols, row))
+            r["type"] = _taxonomy_label(r.pop("primary_taxonomy"))
+            rows.append(r)
         return {"columns": columns, "rows": rows, "row_count": len(rows), "sql": sql.strip()}
 
     @app.get("/chart", response_class=HTMLResponse)
