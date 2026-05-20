@@ -22,6 +22,20 @@ _CONTRACT_PAYER_MAP: dict[str, str] = {
 
 _ABA_CODES = {"97151", "97152", "97153", "97154", "97155", "97156"}
 
+_PAYER_MODIFIER_CONVENTION: dict[str, str] = {
+    "Blue Shield of California": "explicit",
+    "Anthem Blue Cross California": "none",
+    "Blue Cross and Blue Shield of Texas": "cpt_implicit",
+    "Blue Cross and Blue Shield of Illinois": "cpt_implicit",
+}
+
+# For cpt_implicit payers: credential represented by empty-modifier MRF rows
+_CPT_NATURAL_CREDENTIAL: dict[str, str] = {
+    "97151": "HO", "97152": "HO",
+    "97153": "HM", "97154": "HM",
+    "97155": "HO", "97156": "HO",
+}
+
 _TAXONOMY_LABELS: list[tuple[str, str]] = [
     ("103K", "BCBA"),
     ("103T", "Psychologist"),
@@ -293,7 +307,7 @@ def _chart_page_html() -> str:
         }
         const contractRate = getContractRate(payer, cpt, modifier);
         renderChart(data, cpt, modifier, contractRate);
-        renderStats(data, contractRate);
+        renderStats(data, contractRate, payer, cpt);
       }
 
       async function loadTable() {
@@ -345,7 +359,7 @@ def _chart_page_html() -> str:
         });
       }
 
-      function renderStats(data, contractRate) {
+      function renderStats(data, contractRate, payer, cpt) {
         const s = data.stats;
         const items = [
           ["Min", "$" + s.min.toFixed(2)], ["P25", "$" + s.p25.toFixed(2)],
@@ -354,9 +368,17 @@ def _chart_page_html() -> str:
           ["Providers", s.total.toLocaleString()],
         ];
         if (contractRate !== null) items.push(["Our Rate", "<span style='color:#e6522c;font-weight:700'>$" + contractRate.toFixed(2) + "</span>"]);
+        let yourRatesHtml = "";
+        const byCpt = payer && cpt && contractRates[payer] && contractRates[payer][cpt];
+        if (byCpt) {
+          const entries = Object.entries(byCpt).sort(([a], [b]) => a.localeCompare(b));
+          const parts = entries.map(([mod, rate]) => (mod ? mod : "Base") + " $" + rate.toFixed(2));
+          yourRatesHtml = `<div style='width:100%;font-size:11px;color:#888;margin-top:4px'>Your contract: ${parts.join(" · ")}</div>`;
+        }
         document.getElementById("stats").innerHTML = items
           .map(([lbl, val]) => `<div class="stat"><div class="val">${val}</div><div class="lbl">${lbl}</div></div>`).join("")
-          + "<div style='width:100%;font-size:11px;color:#888;margin-top:6px'>Rates above 4× median excluded from chart</div>";
+          + yourRatesHtml
+          + "<div style='width:100%;font-size:11px;color:#888;margin-top:2px'>Rates above 4× median excluded from chart</div>";
       }
 
       function renderTable(result) {
@@ -418,10 +440,15 @@ def create_app(default_parquet_glob: str) -> FastAPI:
 
     contract_rates = _load_contract_rates()
 
-    def _modifier_filter(modifier: str | None) -> str:
-        if modifier:
-            return f"AND list_contains(billing_code_modifiers, '{modifier}')"
-        return ""
+    def _modifier_filter_for_payer(payer: str | None, cpt: str, modifier: str | None) -> str:
+        if not modifier:
+            return ""
+        convention = _PAYER_MODIFIER_CONVENTION.get(payer or "", "explicit")
+        if convention == "none":
+            return ""
+        if convention == "cpt_implicit" and modifier == _CPT_NATURAL_CREDENTIAL.get(cpt):
+            return "AND (billing_code_modifiers IS NULL OR len(billing_code_modifiers) = 0)"
+        return f"AND list_contains(billing_code_modifiers, '{modifier}')"
 
     @app.get("/api/contract-rates")
     def get_contract_rates() -> dict[str, Any]:
@@ -491,7 +518,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     AND billing_class = 'professional'
                     AND negotiated_type IN ('fee schedule', 'per diem', 'negotiated')
                     AND negotiated_rate IS NOT NULL
-                    {_modifier_filter(modifier)}
+                    {_modifier_filter_for_payer(payer, cpt, modifier)}
                     {payer_filter}
                 )
             ) src
@@ -518,7 +545,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
 
     @app.get("/api/rate-distribution")
     def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None, exclude_physicians: str | None = None) -> dict[str, Any]:
-        mod_filter = f"AND list_contains(billing_code_modifiers, '{modifier}')" if modifier else ""
+        mod_filter = _modifier_filter_for_payer(payer, cpt, modifier)
         payer_filter = f"AND payer_name = '{payer}'" if payer else ""
         physician_join = """
             LEFT JOIN read_parquet('/svr/data/nppes/npi_names.parquet') nppes
