@@ -374,7 +374,18 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         payer_filter = f"AND payer_name = '{payer}'" if payer else ""
         physician_filter = """AND (n.primary_taxonomy IS NULL
                 OR (n.primary_taxonomy NOT LIKE '207%'
-                    AND n.primary_taxonomy NOT LIKE '208%'))""" if exclude_physicians else ""
+                    AND n.primary_taxonomy NOT LIKE '208%'
+                    AND n.primary_taxonomy NOT LIKE '363%'
+                    AND n.primary_taxonomy NOT LIKE '367%'
+                    AND n.primary_taxonomy NOT LIKE '225%'
+                    AND n.primary_taxonomy NOT LIKE '235%'
+                    AND n.primary_taxonomy NOT LIKE '213%'
+                    AND n.primary_taxonomy NOT LIKE '174%'
+                    AND n.primary_taxonomy NOT LIKE '390%'
+                    AND n.primary_taxonomy NOT LIKE '152%'
+                    AND n.primary_taxonomy NOT LIKE '231%'
+                    AND n.primary_taxonomy NOT LIKE '111%'
+                    AND n.primary_taxonomy NOT LIKE '122%'))""" if exclude_physicians else ""
         sql = f"""
             SELECT
                 src.npi,
@@ -425,7 +436,18 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                 ON src.npi = nppes.npi
             WHERE (nppes.primary_taxonomy IS NULL
                 OR (nppes.primary_taxonomy NOT LIKE '207%'
-                    AND nppes.primary_taxonomy NOT LIKE '208%'))
+                    AND nppes.primary_taxonomy NOT LIKE '208%'
+                    AND nppes.primary_taxonomy NOT LIKE '363%'
+                    AND nppes.primary_taxonomy NOT LIKE '367%'
+                    AND nppes.primary_taxonomy NOT LIKE '225%'
+                    AND nppes.primary_taxonomy NOT LIKE '235%'
+                    AND nppes.primary_taxonomy NOT LIKE '213%'
+                    AND nppes.primary_taxonomy NOT LIKE '174%'
+                    AND nppes.primary_taxonomy NOT LIKE '390%'
+                    AND nppes.primary_taxonomy NOT LIKE '152%'
+                    AND nppes.primary_taxonomy NOT LIKE '231%'
+                    AND nppes.primary_taxonomy NOT LIKE '111%'
+                    AND nppes.primary_taxonomy NOT LIKE '122%'))
         """ if exclude_physicians else ""
         sql = f"""
             SELECT npi, ROUND(MEDIAN(negotiated_rate), 2) AS median_rate
