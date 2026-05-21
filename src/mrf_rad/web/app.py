@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import csv
+import os
+import secrets
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import duckdb
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, ConfigDict, Field
 
 from mrf_rad.query import run_query
@@ -434,6 +437,14 @@ _COMPLETE_PAYER_NAMES = {
 def create_app(default_parquet_glob: str) -> FastAPI:
     app = FastAPI(title="ABA Rate Explorer")
     config = AppConfig(parquet_glob=default_parquet_glob)
+    _security = HTTPBasic()
+    _usr = os.environ.get("MRF_USER", "aba")
+    _pwd = os.environ.get("MRF_PASS", "rates")
+
+    def _auth(creds: HTTPBasicCredentials = Depends(_security)) -> None:
+        ok = secrets.compare_digest(creds.username, _usr) and secrets.compare_digest(creds.password, _pwd)
+        if not ok:
+            raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
 
     def _con() -> duckdb.DuckDBPyConnection:
         return duckdb.connect()
@@ -450,7 +461,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             return "AND (billing_code_modifiers IS NULL OR len(billing_code_modifiers) = 0)"
         return f"AND list_contains(billing_code_modifiers, '{modifier}')"
 
-    @app.get("/api/contract-rates")
+    @app.get("/api/contract-rates", dependencies=[Depends(_auth)])
     def get_contract_rates() -> dict[str, Any]:
         # Return rates keyed by MRF payer_name → {cpt: {modifier: rate}}
         result: dict[str, dict[str, dict[str, float]]] = {}
@@ -459,11 +470,11 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                 result[mrf_name] = contract_rates[csv_name]
         return result
 
-    @app.get("/", response_class=HTMLResponse)
+    @app.get("/", response_class=HTMLResponse, dependencies=[Depends(_auth)])
     def index() -> str:
         return _chart_page_html()
 
-    @app.get("/api/facets")
+    @app.get("/api/facets", dependencies=[Depends(_auth)])
     def get_facets() -> dict[str, Any]:
         con = _con()
         cpts = con.execute(
@@ -475,7 +486,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             "payer_names": sorted(_COMPLETE_PAYER_NAMES),
         }
 
-    @app.get("/api/plan-rates-median")
+    @app.get("/api/plan-rates-median", dependencies=[Depends(_auth)])
     def get_plan_rates_median(cpt: str, modifier: str | None = None, payer: str | None = None, exclude_physicians: str | None = None) -> dict[str, Any]:
         payer_filter = f"AND payer_name = '{payer}'" if payer else ""
         physician_filter = """AND (n.primary_taxonomy IS NULL
@@ -539,11 +550,11 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             rows.append(r)
         return {"columns": columns, "rows": rows, "row_count": len(rows), "sql": sql.strip()}
 
-    @app.get("/chart", response_class=HTMLResponse)
+    @app.get("/chart", response_class=HTMLResponse, dependencies=[Depends(_auth)])
     def chart_page() -> str:
         return _chart_page_html()
 
-    @app.get("/api/rate-distribution")
+    @app.get("/api/rate-distribution", dependencies=[Depends(_auth)])
     def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None, exclude_physicians: str | None = None) -> dict[str, Any]:
         mod_filter = _modifier_filter_for_payer(payer, cpt, modifier)
         payer_filter = f"AND payer_name = '{payer}'" if payer else ""
@@ -630,7 +641,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         return {"bins": bins, "stats": stats}
 
     # Keep full query API available for future use
-    @app.get("/api/config")
+    @app.get("/api/config", dependencies=[Depends(_auth)])
     def get_config() -> dict[str, Any]:
         return asdict(config)
 
