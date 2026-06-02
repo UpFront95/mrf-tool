@@ -21,6 +21,7 @@ _CONTRACT_PAYER_MAP: dict[str, str] = {
     "Anthem Blue Cross California": "Anthem Blue Cross of California",
     "Blue Cross and Blue Shield of Texas": "Blue Cross Blue Shield of Texas",
     "Blue Cross and Blue Shield of Illinois": "Blue Cross Blue Shield of Illinois",
+    "United HealthCare Services, Inc.": "UMR",
 }
 
 _ABA_CODES = {"97151", "97152", "97153", "97154", "97155", "97156"}
@@ -30,6 +31,8 @@ _PAYER_MODIFIER_CONVENTION: dict[str, str] = {
     "Anthem Blue Cross California": "none",
     "Blue Cross and Blue Shield of Texas": "cpt_implicit",
     "Blue Cross and Blue Shield of Illinois": "none",
+    "United HealthCare Services, Inc.": "explicit",
+    "Blue Cross and Blue Shield of Massachusetts Inc": "explicit",
 }
 
 # For cpt_implicit payers: credential represented by empty-modifier MRF rows
@@ -169,15 +172,15 @@ def _chart_page_html() -> str:
     <title>ABA Rate Explorer</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <style>
-      :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color-scheme: light dark; }
+      :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color-scheme: light; }
       body { margin: 0; background: #f4f6f8; color: #14212b; }
       main { max-width: 1100px; margin: 0 auto; padding: 24px; }
       h1 { margin: 0 0 4px; font-weight: 600; }
       .controls { display: flex; gap: 10px; flex-wrap: nowrap; align-items: flex-end; margin: 16px 0; }
       .field { display: grid; gap: 4px; }
       label { font-size: 11px; font-weight: 600; color: #51606f; }
-      select { padding: 7px 8px; border: 1px solid #c8d0d9; border-radius: 6px; font: inherit; background: #fff; }
-      input[type="text"], input[type="number"] { padding: 7px 8px; border: 1px solid #c8d0d9; border-radius: 6px; font: inherit; background: #fff; }
+      select { padding: 7px 8px; border: 1px solid #c8d0d9; border-radius: 6px; font: inherit; background: #fff; color: #14212b; }
+      input[type="text"], input[type="number"] { padding: 7px 8px; border: 1px solid #c8d0d9; border-radius: 6px; font: inherit; background: #fff; color: #14212b; }
       button { padding: 8px 18px; background: #1f6feb; color: #fff; border: none; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
       button:hover { background: #1a60d6; }
       button.secondary { background: #fff; color: #1f6feb; border: 1px solid #1f6feb; }
@@ -227,9 +230,13 @@ def _chart_page_html() -> str:
             <option value="HO">HO — master's level</option>
           </select>
         </div>
-        <div class="checkbox-field">
-          <input type="checkbox" id="exclude_physicians" checked>
-          <label for="exclude_physicians">Exclude physicians</label>
+        <div class="field">
+          <label for="provider_filter">Providers</label>
+          <select id="provider_filter">
+            <option value="excl_phys" selected>Exclude physicians</option>
+            <option value="bcba">BCBA only</option>
+            <option value="all">All</option>
+          </select>
         </div>
         <button id="run_btn">Show Chart</button>
       </div>
@@ -289,11 +296,11 @@ def _chart_page_html() -> str:
         const payer = document.getElementById("payer").value;
         if (!cpt) { alert("Select a CPT code."); return; }
 
-        const excludePhysicians = document.getElementById("exclude_physicians").checked;
+        const providerFilter = document.getElementById("provider_filter").value;
         const params = { cpt };
         if (modifier) params.modifier = modifier;
         if (payer) params.payer = payer;
-        if (excludePhysicians) params.exclude_physicians = "1";
+        if (providerFilter !== "all") params.provider_filter = providerFilter;
 
         const resp = await fetch("/api/rate-distribution?" + new URLSearchParams(params));
         const data = await resp.json();
@@ -323,11 +330,11 @@ def _chart_page_html() -> str:
         document.getElementById("table_panel").style.display = "block";
         document.getElementById("table_panel").scrollIntoView({ behavior: "smooth", block: "start" });
 
-        const excludePhysicians = document.getElementById("exclude_physicians").checked;
+        const providerFilter = document.getElementById("provider_filter").value;
         const params = { cpt };
         if (modifier) params.modifier = modifier;
         if (payer) params.payer = payer;
-        if (excludePhysicians) params.exclude_physicians = "1";
+        if (providerFilter !== "all") params.provider_filter = providerFilter;
 
         const resp = await fetch("/api/plan-rates-median?" + new URLSearchParams(params));
         const data = await resp.json();
@@ -367,7 +374,8 @@ def _chart_page_html() -> str:
         const items = [
           ["Min", "$" + s.min.toFixed(2)], ["P25", "$" + s.p25.toFixed(2)],
           ["Median", "$" + s.median.toFixed(2)], ["Average", "$" + s.mean.toFixed(2)],
-          ["P75", "$" + s.p75.toFixed(2)], ["Max", "$" + s.max.toFixed(2)],
+          ["P75", "$" + s.p75.toFixed(2)], ["P90", "$" + s.p90.toFixed(2)],
+          ["Max", "$" + s.max.toFixed(2)],
           ["Providers", s.total.toLocaleString()],
         ];
         if (contractRate !== null) items.push(["Our Rate", "<span style='color:#e6522c;font-weight:700'>$" + contractRate.toFixed(2) + "</span>"]);
@@ -395,10 +403,11 @@ def _chart_page_html() -> str:
             return (av < bv ? -1 : av > bv ? 1 : 0) * sortState.dir;
           });
         }
+        const colLabel = c => c.replace(/_rate$/, "").replace(/^modifiers$/, "mod");
         const head = "<thead><tr>" + cols.map(c => {
           const active = sortState.col === c;
           const cls = active ? (sortState.dir === 1 ? " sort-asc" : " sort-desc") : "";
-          return `<th class="${cls}" data-col="${c}">${c}</th>`;
+          return `<th class="${cls}" data-col="${c}">${colLabel(c)}</th>`;
         }).join("") + "</tr></thead>";
         const body = "<tbody>" + rows.map(row => "<tr>" + cols.map(c => {
           const v = row[c];
@@ -431,6 +440,8 @@ _COMPLETE_PAYER_NAMES = {
     "Anthem Blue Cross California",
     "Blue Cross and Blue Shield of Texas",
     "Blue Cross and Blue Shield of Illinois",
+    "United HealthCare Services, Inc.",
+    "Blue Cross and Blue Shield of Massachusetts Inc",
 }
 
 
@@ -487,9 +498,12 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         }
 
     @app.get("/api/plan-rates-median", dependencies=[Depends(_auth)])
-    def get_plan_rates_median(cpt: str, modifier: str | None = None, payer: str | None = None, exclude_physicians: str | None = None) -> dict[str, Any]:
+    def get_plan_rates_median(cpt: str, modifier: str | None = None, payer: str | None = None, provider_filter: str | None = None) -> dict[str, Any]:
         payer_filter = f"AND payer_name = '{payer}'" if payer else ""
-        physician_filter = """AND (n.primary_taxonomy IS NULL
+        if provider_filter == "bcba":
+            taxonomy_filter = "AND n.primary_taxonomy LIKE '103K%'"
+        elif provider_filter == "excl_phys":
+            taxonomy_filter = """AND (n.primary_taxonomy IS NULL
                 OR (n.primary_taxonomy NOT LIKE '204%'
                     AND n.primary_taxonomy NOT LIKE '207%'
                     AND n.primary_taxonomy NOT LIKE '208%'
@@ -506,7 +520,9 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     AND n.primary_taxonomy NOT LIKE '122%'
                     AND n.primary_taxonomy NOT LIKE '103T%'
                     AND n.primary_taxonomy NOT LIKE '173%'
-                    AND n.primary_taxonomy NOT LIKE '364%'))""" if exclude_physicians else ""
+                    AND n.primary_taxonomy NOT LIKE '364%'))"""
+        else:
+            taxonomy_filter = ""
         sql = f"""
             SELECT
                 src.npi,
@@ -516,7 +532,6 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                 ROUND(MEDIAN(src.negotiated_rate), 2) AS median_rate,
                 MIN(src.negotiated_rate) AS min_rate,
                 MAX(src.negotiated_rate) AS max_rate,
-                COUNT(*) AS rate_count,
                 ANY_VALUE(n.primary_taxonomy) AS primary_taxonomy
             FROM (
                 SELECT DISTINCT npi, negotiated_rate, modifiers, payer_name
@@ -529,20 +544,21 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     AND billing_class = 'professional'
                     AND negotiated_type IN ('fee schedule', 'per diem', 'negotiated')
                     AND negotiated_rate IS NOT NULL
+                    AND NOT list_has_any(billing_code_modifiers, ['53', '55', '56'])
                     {_modifier_filter_for_payer(payer, cpt, modifier)}
                     {payer_filter}
                 )
             ) src
             LEFT JOIN read_parquet('/svr/data/nppes/npi_names.parquet') n ON src.npi = n.npi
-            WHERE 1=1 {physician_filter}
+            WHERE 1=1 {taxonomy_filter}
             GROUP BY src.npi, provider_name, src.modifiers, src.payer_name
             ORDER BY median_rate DESC NULLS LAST, provider_name
             LIMIT 10000
         """
         con = _con()
         result = con.execute(sql, [config.glob_list, cpt]).fetchall()
-        db_cols = ["npi", "provider_name", "modifiers", "payer_name", "median_rate", "min_rate", "max_rate", "rate_count", "primary_taxonomy"]
-        columns = ["npi", "provider_name", "type", "modifiers", "payer_name", "median_rate", "min_rate", "max_rate", "rate_count"]
+        db_cols = ["npi", "provider_name", "modifiers", "payer_name", "median_rate", "min_rate", "max_rate", "primary_taxonomy"]
+        columns = ["npi", "provider_name", "type", "modifiers", "payer_name", "median_rate", "min_rate", "max_rate"]
         rows = []
         for row in result:
             r = dict(zip(db_cols, row))
@@ -555,31 +571,39 @@ def create_app(default_parquet_glob: str) -> FastAPI:
         return _chart_page_html()
 
     @app.get("/api/rate-distribution", dependencies=[Depends(_auth)])
-    def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None, exclude_physicians: str | None = None) -> dict[str, Any]:
+    def get_rate_distribution(cpt: str, modifier: str | None = None, payer: str | None = None, provider_filter: str | None = None) -> dict[str, Any]:
         mod_filter = _modifier_filter_for_payer(payer, cpt, modifier)
         payer_filter = f"AND payer_name = '{payer}'" if payer else ""
-        physician_join = """
-            LEFT JOIN read_parquet('/svr/data/nppes/npi_names.parquet') nppes
-                ON src.npi = nppes.npi
-            WHERE (nppes.primary_taxonomy IS NULL
-                OR (nppes.primary_taxonomy NOT LIKE '204%'
-                    AND nppes.primary_taxonomy NOT LIKE '207%'
-                    AND nppes.primary_taxonomy NOT LIKE '208%'
-                    AND nppes.primary_taxonomy NOT LIKE '363%'
-                    AND nppes.primary_taxonomy NOT LIKE '367%'
-                    AND nppes.primary_taxonomy NOT LIKE '225%'
-                    AND nppes.primary_taxonomy NOT LIKE '235%'
-                    AND nppes.primary_taxonomy NOT LIKE '213%'
-                    AND nppes.primary_taxonomy NOT LIKE '174%'
-                    AND nppes.primary_taxonomy NOT LIKE '390%'
-                    AND nppes.primary_taxonomy NOT LIKE '152%'
-                    AND nppes.primary_taxonomy NOT LIKE '231%'
-                    AND nppes.primary_taxonomy NOT LIKE '111%'
-                    AND nppes.primary_taxonomy NOT LIKE '122%'
-                    AND nppes.primary_taxonomy NOT LIKE '103T%'
-                    AND nppes.primary_taxonomy NOT LIKE '173%'
-                    AND nppes.primary_taxonomy NOT LIKE '364%'))
-        """ if exclude_physicians else ""
+        if provider_filter == "bcba":
+            physician_join = """
+                LEFT JOIN read_parquet('/svr/data/nppes/npi_names.parquet') nppes ON src.npi = nppes.npi
+                WHERE nppes.primary_taxonomy LIKE '103K%'
+            """
+        elif provider_filter == "excl_phys":
+            physician_join = """
+                LEFT JOIN read_parquet('/svr/data/nppes/npi_names.parquet') nppes
+                    ON src.npi = nppes.npi
+                WHERE (nppes.primary_taxonomy IS NULL
+                    OR (nppes.primary_taxonomy NOT LIKE '204%'
+                        AND nppes.primary_taxonomy NOT LIKE '207%'
+                        AND nppes.primary_taxonomy NOT LIKE '208%'
+                        AND nppes.primary_taxonomy NOT LIKE '363%'
+                        AND nppes.primary_taxonomy NOT LIKE '367%'
+                        AND nppes.primary_taxonomy NOT LIKE '225%'
+                        AND nppes.primary_taxonomy NOT LIKE '235%'
+                        AND nppes.primary_taxonomy NOT LIKE '213%'
+                        AND nppes.primary_taxonomy NOT LIKE '174%'
+                        AND nppes.primary_taxonomy NOT LIKE '390%'
+                        AND nppes.primary_taxonomy NOT LIKE '152%'
+                        AND nppes.primary_taxonomy NOT LIKE '231%'
+                        AND nppes.primary_taxonomy NOT LIKE '111%'
+                        AND nppes.primary_taxonomy NOT LIKE '122%'
+                        AND nppes.primary_taxonomy NOT LIKE '103T%'
+                        AND nppes.primary_taxonomy NOT LIKE '173%'
+                        AND nppes.primary_taxonomy NOT LIKE '364%'))
+            """
+        else:
+            physician_join = ""
         sql = f"""
             SELECT npi, ROUND(MEDIAN(negotiated_rate), 2) AS median_rate
             FROM (
@@ -593,6 +617,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
                     AND billing_class = 'professional'
                     AND negotiated_type IN ('fee schedule', 'per diem', 'negotiated')
                     AND negotiated_rate IS NOT NULL
+                    AND NOT list_has_any(billing_code_modifiers, ['53', '55', '56'])
                     {mod_filter}
                     {payer_filter}
                 ) src
@@ -619,6 +644,7 @@ def create_app(default_parquet_glob: str) -> FastAPI:
             "median": sorted_rates[n // 2],
             "mean": round(sum(sorted_rates) / n, 2),
             "p75": sorted_rates[3 * n // 4],
+            "p90": sorted_rates[int(n * 0.9)],
             "max": sorted_rates[-1],
             "total": n,
         }

@@ -109,6 +109,8 @@ def run_query(
         parameters.append(max_rate)
     if benchmark_eligible:
         where_parts.append("is_benchmark_eligible = true")
+    # Exclude procedure-status modifiers (53=discontinued, 55=postop mgmt only, 56=preop mgmt only)
+    where_parts.append("NOT list_has_any(billing_code_modifiers, ['53', '55', '56'])")
 
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     relation = _read_parquet_expr(parquet_glob)
