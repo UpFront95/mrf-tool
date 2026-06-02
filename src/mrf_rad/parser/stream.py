@@ -10,7 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO, Iterator
 from urllib.parse import urlparse
+import ssl
 from urllib.request import urlopen
+
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
 
 import ijson
 
@@ -51,7 +56,7 @@ def _is_gzip(source: str) -> bool:
 
 def _open_binary(source: str) -> BinaryIO:
     if _is_url(source):
-        raw = urlopen(source, timeout=60)
+        raw = urlopen(source, timeout=60, context=_SSL_CTX)
     else:
         raw = Path(source).open("rb")
 
@@ -134,7 +139,7 @@ def _download_to_temp(source: str, tmp_dir: str | None = None) -> str:
     suffix = ".json.gz" if _is_gzip(source) else ".json"
     fd, tmp_path = tempfile.mkstemp(suffix=suffix, dir=tmp_dir)
     try:
-        with urlopen(source, timeout=300) as resp, os.fdopen(fd, "wb") as f:
+        with urlopen(source, timeout=300, context=_SSL_CTX) as resp, os.fdopen(fd, "wb") as f:
             shutil.copyfileobj(resp, f)
     except Exception:
         os.unlink(tmp_path)
