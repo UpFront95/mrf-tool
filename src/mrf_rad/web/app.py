@@ -449,8 +449,10 @@ def create_app(default_parquet_glob: str) -> FastAPI:
     app = FastAPI(title="ABA Rate Explorer")
     config = AppConfig(parquet_glob=default_parquet_glob)
     _security = HTTPBasic()
-    _usr = os.environ.get("MRF_USER", "aba")
-    _pwd = os.environ.get("MRF_PASS", "rates")
+    _usr = os.environ.get("MRF_USER") or ""
+    _pwd = os.environ.get("MRF_PASS") or ""
+    if not _usr or not _pwd:
+        raise RuntimeError("MRF_USER and MRF_PASS environment variables must be set")
 
     def _auth(creds: HTTPBasicCredentials = Depends(_security)) -> None:
         ok = secrets.compare_digest(creds.username, _usr) and secrets.compare_digest(creds.password, _pwd)
