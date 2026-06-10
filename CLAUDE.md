@@ -107,7 +107,7 @@ After any material change (new feature, endpoint, data pipeline step, bug fix), 
 
 ## Current State
 
-- Pipeline fully operational for BCBSMN and BSCA.
+- Live in production (dixie) — 9 payers: BSCA, Anthem (national + CA), BCBS IL, BCBS MA, BCBS TX, UHC OHBS, UHC BH-P3, Regence WA. Pipeline also validated on BCBSMN.
 - Profiles: `aba` (CPT 97151–97156), `radiology` (CPT 70000–79999).
 - ABA benchmark eligibility filtering excludes percentage rates, institutional rows, and extreme outliers.
 - Large BSCA index JSON (`2026-05-01_Blue-Shield-of-California_index.json`, ~192 MB) lives at repo root for local testing.
@@ -134,10 +134,14 @@ systemctl --user start|stop|restart|status mrf-rad
 journalctl --user -u mrf-rad -f   # live logs
 ```
 
-**Adding a new payer:** copy its `<payer>-aba/` parquet dir to `/svr/data/mrf-tool/parquet/` and `systemctl --user restart mrf-rad`. The start script auto-discovers all `*-aba/` dirs — no config edits needed.
+**Adding a new payer:** two steps are required —
+1. Copy its `<payer>-aba/` parquet dir to `/svr/data/mrf-tool/parquet/`. The start script auto-discovers all `*-aba/` dirs, so no config or script edits are needed for the data to load.
+2. Add the payer's exact `payer_name` value (as it appears in the MRF) to the `_COMPLETE_PAYER_NAMES` set in `src/mrf_rad/web/app.py`. **This is mandatory** — the UI payer dropdown and all queries are gated on this allowlist, so a payer whose `payer_name` is missing here is invisible even though its data is loaded.
+
+Then `systemctl --user restart mrf-rad`.
 
 ### HTTP Basic Auth
-Credentials are set via `MRF_USER` / `MRF_PASS` in `.env`. Defaults if unset: `aba` / `rates`.
+Credentials are read from `MRF_USER` / `MRF_PASS` in `.env`. Both must be set — the app raises at startup if either is missing (there is no insecure fallback default).
 
 ## Payer Pipeline (Researched, Not Yet in Production)
 
@@ -145,8 +149,7 @@ Full probe notes at `data/index/payer-probe-notes.md`. These have been investiga
 
 | Payer | Effort | Notes |
 |-------|--------|-------|
-| **Cigna** | Low | Re-fetch `https://www.cigna.com/static/mrf/latest.json` for fresh signed TOC URL; pick `national-ppo` file |
-| **Regence WA** | Low | Re-fetch RGA TOC at `https://sawus2prdticmrfrgawa.blob.core.windows.net/202605/2026-05-08_RGA_index.json` for fresh signed URL; 2 native WA files |
+| **Cigna** | Low | Re-fetch `https://www.cigna.com/static/mrf/latest.json` for fresh signed TOC URL (now `mrfs[0].files[0].url`); pick `national-ppo` file |
 | **Health Net CA** | Low | Single 270 MB plain JSON (not .gz); tiny network (9 providers) |
 | **Aetna** | Medium | 3-step HealthSparq session dance to get TOC URL; use ALICFI (fully insured) state files |
 | **Anthem/Carelon** | High | ~397 native files; dedup by NETWORKCODE before batching; files up to 52 GB |

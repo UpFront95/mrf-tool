@@ -442,6 +442,7 @@ _COMPLETE_PAYER_NAMES = {
     "Blue Cross and Blue Shield of Illinois",
     "United HealthCare Services, Inc.",
     "Blue Cross and Blue Shield of Massachusetts Inc",
+    "Regence BlueShield of Washington",
 }
 
 

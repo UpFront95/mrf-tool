@@ -8,3 +8,4 @@ data/
 *.json.gz
 2026-*.json
 .claude/
+archive/
