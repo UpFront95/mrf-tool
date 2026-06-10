@@ -42,17 +42,19 @@ PARQUET_BASE="/svr/data/mrf-tool/parquet"
 # Full path to the mrf-rad CLI inside the project virtualenv.
 MRF_RAD="/srv/share/mrf-tool/.venv/bin/mrf-rad"
 
-# Build a comma-joined list of glob patterns — one per matching payer dir.
+# Build a comma-joined list of glob patterns — one per matching payer dir
+# that actually contains at least one .parquet file.
 # Example result:
 #   /svr/data/mrf-tool/parquet/bsca-aba/*.parquet,/svr/data/mrf-tool/parquet/bcbstx-aba/*.parquet
 #
-# How this works:
-#   - `ls -d` lists only directories matching the pattern
-#   - awk appends /*.parquet to each path
-#   - paste -sd, joins lines with commas into a single string
-PARQUET_GLOB=$(ls -d "${PARQUET_BASE}"/*-aba/ 2>/dev/null \
-    | awk '{print $0 "*.parquet"}' \
-    | paste -sd,)
+# Empty <payer>-aba/ dirs are skipped on purpose: DuckDB's read_parquet
+# raises "No files found that match the pattern" if any glob in the list
+# matches zero files, which would take down every query. Such empty dirs
+# appear transiently while a new payer is mid-parse (the output dir exists
+# before the .parquet is written), so we must exclude them here.
+PARQUET_GLOB=$(for d in "${PARQUET_BASE}"/*-aba/; do
+    compgen -G "${d}*.parquet" >/dev/null 2>&1 && printf '%s*.parquet\n' "${d}"
+done | paste -sd,)
 
 if [[ -z "${PARQUET_GLOB}" ]]; then
     echo "ERROR: No *-aba/ directories found under ${PARQUET_BASE}" >&2
