@@ -107,7 +107,7 @@ After any material change (new feature, endpoint, data pipeline step, bug fix), 
 
 ## Current State
 
-- Live in production (dixie) — 9 payers: BSCA, Anthem (national + CA), BCBS IL, BCBS MA, BCBS TX, UHC OHBS, UHC BH-P3, Regence WA. Pipeline also validated on BCBSMN.
+- Live in production (dixie) — 11 payers: BSCA, Anthem (national + CA), BCBS IL, BCBS MA, BCBS TX, UHC OHBS, UHC BH-P3, Regence WA, Cigna (national-ppo), Health Net CA. Pipeline also validated on BCBSMN.
 - Profiles: `aba` (CPT 97151–97156), `radiology` (CPT 70000–79999).
 - ABA benchmark eligibility filtering excludes percentage rates, institutional rows, and extreme outliers.
 - Large BSCA index JSON (`2026-05-01_Blue-Shield-of-California_index.json`, ~192 MB) lives at repo root for local testing.
@@ -149,8 +149,6 @@ Full probe notes at `data/index/payer-probe-notes.md`. These have been investiga
 
 | Payer | Effort | Notes |
 |-------|--------|-------|
-| **Cigna** | Low | Re-fetch `https://www.cigna.com/static/mrf/latest.json` for fresh signed TOC URL (now `mrfs[0].files[0].url`); pick `national-ppo` file |
-| **Health Net CA** | Low | Single 270 MB plain JSON (not .gz); tiny network (9 providers) |
 | **Aetna** | Medium | 3-step HealthSparq session dance to get TOC URL; use ALICFI (fully insured) state files |
 | **Anthem/Carelon** | High | ~397 native files; dedup by NETWORKCODE before batching; files up to 52 GB |
 | **Premera WA** | Blocked | JS portal killed programmatic TOC access as of Jan 2026 |

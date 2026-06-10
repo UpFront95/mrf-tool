@@ -443,6 +443,8 @@ _COMPLETE_PAYER_NAMES = {
     "United HealthCare Services, Inc.",
     "Blue Cross and Blue Shield of Massachusetts Inc",
     "Regence BlueShield of Washington",
+    "Cigna Health Life Insurance Company",
+    "Centene Management Company LLC",
 }
 
 
