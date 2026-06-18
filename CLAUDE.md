@@ -107,7 +107,7 @@ After any material change (new feature, endpoint, data pipeline step, bug fix), 
 
 ## Current State
 
-- Live in production (dixie) — 11 payers: BSCA, Anthem (national + CA), BCBS IL, BCBS MA, BCBS TX, UHC OHBS, UHC BH-P3, Regence WA, Cigna (national-ppo), Health Net CA. Pipeline also validated on BCBSMN.
+- Live in production (dixie) — 12 payers: BSCA, Anthem (national + CA), BCBS IL, BCBS MA, BCBS TX, UHC OHBS, UHC BH-P3, Regence WA, Cigna (national-ppo), Health Net CA, Aetna (Life Insurance Company, national PPO). Pipeline also validated on BCBSMN.
 - Profiles: `aba` (CPT 97151–97156), `radiology` (CPT 70000–79999).
 - ABA benchmark eligibility filtering excludes percentage rates, institutional rows, and extreme outliers.
 - Large BSCA index JSON (`2026-05-01_Blue-Shield-of-California_index.json`, ~192 MB) lives at repo root for local testing.
@@ -149,10 +149,22 @@ Full probe notes at `data/index/payer-probe-notes.md`. These have been investiga
 
 | Payer | Effort | Notes |
 |-------|--------|-------|
-| **Aetna** | Medium | 3-step HealthSparq session dance to get TOC URL; use ALICFI (fully insured) state files |
 | **Anthem/Carelon** | High | ~397 native files; dedup by NETWORKCODE before batching; files up to 52 GB |
 | **Premera WA** | Blocked | JS portal killed programmatic TOC access as of Jan 2026 |
 | **Kaiser NorCal** | TBD | Catalight (ABA network manager) routes through Kaiser — check Kaiser NorCal MRF |
+
+### Aetna — national live; 13 state-HMO entities staged (not deployed)
+The national **Aetna Life Insurance Company** PPO is live (1 representative file =
+15.6M rows; all 319 ALICFI "Aetna Life" plan files proven rate-identical, so 1 rep
+covers them all). 13 smaller state-HMO entities (Aetna Health of CA/PA/FL/etc.) are
+parsed and staged at `/svr/data/mrf-tool/aetna-work/parquet-stage/` on dixie but NOT
+deployed — they add 13 separate `payer_name`s and have heavy intra-entity file
+duplication (dedup to 1 rep/entity before deploying). **Aetna parse gotchas:** the
+heavy parser holds 3–8 GB RAM per national file (provider-reference map) and is
+GIL-bound — run process-parallel at concurrency ≤2 on the 15 GB box, and set BOTH
+`--tmp-dir` and `TMPDIR` to `/svr/data` (sdb1) so downloads + DuckDB scratch never
+touch the root SSD (`/tmp` on root filled it once). Re-fetch the TOC via the
+3-step HealthSparq dance (brandCode `ALICFI`) for fresh signed URLs each run.
 
 ## Github
 

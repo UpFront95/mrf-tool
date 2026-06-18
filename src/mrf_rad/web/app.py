@@ -26,6 +26,9 @@ _CONTRACT_PAYER_MAP: dict[str, str] = {
     # schedule is "CIGNA HealthCare - A1" (identical to CIGNA Global / Curative /
     # Gravie). "A2" is a ~5.5% lower tier, so A1 is the standard representative.
     "Cigna Health Life Insurance Company": "CIGNA HealthCare - A1",
+    # MRF national PPO is "Aetna Life Insurance Company"; our contract schedule
+    # is "Aetna Health Inc." (identical to Curative/GEHA/Gravie/Allied-Aetna).
+    "Aetna Life Insurance Company": "Aetna Health Inc.",
 }
 
 _ABA_CODES = {"97151", "97152", "97153", "97154", "97155", "97156"}
@@ -449,6 +452,7 @@ _COMPLETE_PAYER_NAMES = {
     "Regence BlueShield of Washington",
     "Cigna Health Life Insurance Company",
     "Centene Management Company LLC",
+    "Aetna Life Insurance Company",
 }
 
 
