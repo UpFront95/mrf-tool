@@ -107,7 +107,7 @@ After any material change (new feature, endpoint, data pipeline step, bug fix), 
 
 ## Current State
 
-- Live in production (dixie) — 12 payers: BSCA, Anthem (national + CA), BCBS IL, BCBS MA, BCBS TX, UHC OHBS, UHC BH-P3, Regence WA, Cigna (national-ppo), Health Net CA, Aetna (Life Insurance Company, national PPO). Pipeline also validated on BCBSMN.
+- Live in production (dixie) — 13 payers: BSCA, Anthem (national + CA), BCBS IL, BCBS MA, BCBS TX, UHC OHBS, UHC BH-P3, Regence WA, Cigna (national-ppo), Health Net CA, Aetna (Life Insurance Company, national PPO), BCBS Arizona. Pipeline also validated on BCBSMN.
 - Profiles: `aba` (CPT 97151–97156), `radiology` (CPT 70000–79999).
 - ABA benchmark eligibility filtering excludes percentage rates, institutional rows, and extreme outliers.
 - Large BSCA index JSON (`2026-05-01_Blue-Shield-of-California_index.json`, ~192 MB) lives at repo root for local testing.
@@ -164,7 +164,25 @@ heavy parser holds 3–8 GB RAM per national file (provider-reference map) and i
 GIL-bound — run process-parallel at concurrency ≤2 on the 15 GB box, and set BOTH
 `--tmp-dir` and `TMPDIR` to `/svr/data` (sdb1) so downloads + DuckDB scratch never
 touch the root SSD (`/tmp` on root filled it once). Re-fetch the TOC via the
-3-step HealthSparq dance (brandCode `ALICFI`) for fresh signed URLs each run.
+3-step HealthSparq dance (brandCode `ALICFI`) for fresh signed URLs each run —
+now scripted: `scripts/fetch_healthsparq_toc.py` (login → `v2/mrf/all` →
+`latest_metadata.json`, emits a tool-native index). Drives via `curl` because the
+HealthSparq host 403s Python's TLS fingerprint (Incapsula).
+
+### BCBS Arizona (AZBlue) — live; HealthSparq, same platform as Aetna
+`insurerCode=BCBSAZ_I`, `brandCode=BCBSAZ`, egress `bcbsaz-egress.nophi.kyruushsq.com`;
+`payer_name` = `Blue Cross Blue Shield of Arizona`. Full access recipe + data structure
+in `data/index/bcbsaz-access-recipe.md`. 1,129 plan entries → 489 unique files; ABA
+present in medical files (all 6 codes, `negotiated` type), absent from the 559-ref
+`BAZ-ASHN` specialty file and the `BAZ-EYE` vision file (both excluded). 487 medical
+files dedup to **13 network tiers** (PP2/PPO/ALN/PRS/PRM/PPP/PMA/PRM/HMO/HPN/ALH/NBR/
+STH/HM2 — tier code from the filename; all within-tier rate-identical, confirmed by
+3-file ABA fingerprint). Parse the smallest file per tier
+(`data/index/bcbsaz-representative.json`, ~8.9 GB). NB: cross-tier ABA-rate coincidences
+exist (PPP/PRM/PRS share rates *this month*) but are deliberately **not** merged —
+kept per-tier to match the BSCA per-network-tier precedent and stay stable across monthly
+refreshes. Files are ~0.5–1.1 GB compressed like Aetna — same `--tmp-dir`/`TMPDIR` +
+concurrency ≤2 guidance applies.
 
 ## Github
 

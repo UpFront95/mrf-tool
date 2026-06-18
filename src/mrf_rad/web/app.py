@@ -453,6 +453,7 @@ _COMPLETE_PAYER_NAMES = {
     "Cigna Health Life Insurance Company",
     "Centene Management Company LLC",
     "Aetna Life Insurance Company",
+    "Blue Cross Blue Shield of Arizona",
 }
 
 
